@@ -1747,7 +1747,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.6.0")
+    return web.Response(text="1.7.0")
 
 
 @routes.get("/workflow-models/settings")

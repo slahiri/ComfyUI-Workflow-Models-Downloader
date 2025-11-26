@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.6.0";
+const VERSION = "1.7.0";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
