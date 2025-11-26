@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.2.1";
+const VERSION = "1.3.0";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -390,6 +390,113 @@ const styles = `
     max-width: 300px;
     word-break: break-all;
 }
+
+.wmd-settings-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-right: 10px;
+}
+
+.wmd-settings-btn:hover {
+    color: #fff;
+}
+
+.wmd-settings-panel {
+    background-color: #252525;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.wmd-settings-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wmd-settings-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 14px;
+    gap: 12px;
+}
+
+.wmd-settings-label {
+    min-width: 140px;
+    color: #ccc;
+    font-size: 14px;
+}
+
+.wmd-settings-input {
+    flex: 1;
+    background-color: #333;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: monospace;
+}
+
+.wmd-settings-input:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.wmd-settings-input::placeholder {
+    color: #666;
+}
+
+.wmd-settings-status {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    min-width: 80px;
+    text-align: center;
+}
+
+.wmd-settings-status.set {
+    background-color: #1a4a3a;
+    color: #4CAF50;
+}
+
+.wmd-settings-status.not-set {
+    background-color: #4a3a1a;
+    color: #ff9800;
+}
+
+.wmd-settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #444;
+}
+
+.wmd-settings-hint {
+    font-size: 12px;
+    color: #666;
+    margin-top: 4px;
+}
+
+.wmd-settings-link {
+    color: #5599ff;
+    text-decoration: none;
+}
+
+.wmd-settings-link:hover {
+    text-decoration: underline;
+}
 `;
 
 // Add styles to document
@@ -404,6 +511,8 @@ class WorkflowModelsDownloader {
         this.models = [];
         this.downloads = {};
         this.progressInterval = null;
+        this.showSettings = false;
+        this.settings = null;
     }
 
     async show() {
@@ -494,9 +603,15 @@ class WorkflowModelsDownloader {
             $el("div.wmd-modal", [
                 $el("div.wmd-modal-header", [
                     $el("h2.wmd-modal-title", ["Workflow Models Downloader"]),
-                    $el("button.wmd-modal-close", {
-                        onclick: () => this.close()
-                    }, ["\u00D7"])
+                    $el("div", { style: { display: "flex", alignItems: "center" } }, [
+                        $el("button.wmd-settings-btn", {
+                            onclick: () => this.toggleSettings(),
+                            title: "Settings"
+                        }, ["\u2699"]),
+                        $el("button.wmd-modal-close", {
+                            onclick: () => this.close()
+                        }, ["\u00D7"])
+                    ])
                 ]),
                 $el("div.wmd-modal-body", { id: "wmd-body" }, [
                     $el("div.wmd-loading", [
@@ -1174,6 +1289,230 @@ class WorkflowModelsDownloader {
         const sizes = ["B", "KB", "MB", "GB"];
         const i = Math.floor(Math.log(bytes) / Math.log(k));
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    }
+
+    async toggleSettings() {
+        this.showSettings = !this.showSettings;
+        const body = document.getElementById("wmd-body");
+
+        if (this.showSettings) {
+            // Load current settings
+            await this.loadSettings();
+            // Insert settings panel at the top
+            const settingsPanel = this.createSettingsPanel();
+            body.insertBefore(settingsPanel, body.firstChild);
+        } else {
+            // Remove settings panel
+            const panel = document.getElementById("wmd-settings-panel");
+            if (panel) panel.remove();
+        }
+    }
+
+    async loadSettings() {
+        try {
+            const response = await api.fetchApi("/workflow-models/settings");
+            this.settings = await response.json();
+        } catch (error) {
+            console.error("[WMD] Error loading settings:", error);
+            this.settings = {
+                huggingface_token: '',
+                civitai_api_key: '',
+                huggingface_token_set: false,
+                civitai_api_key_set: false
+            };
+        }
+    }
+
+    createSettingsPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'wmd-settings-panel';
+        panel.className = 'wmd-settings-panel';
+
+        const hfStatus = this.settings?.huggingface_token_set ? 'set' : 'not-set';
+        const hfStatusText = this.settings?.huggingface_token_set ? 'Configured' : 'Not Set';
+        const civitStatus = this.settings?.civitai_api_key_set ? 'set' : 'not-set';
+        const civitStatusText = this.settings?.civitai_api_key_set ? 'Configured' : 'Not Set';
+
+        panel.innerHTML = `
+            <div class="wmd-settings-title">
+                <span>\u2699</span> API Settings
+            </div>
+
+            <div class="wmd-settings-row">
+                <label class="wmd-settings-label">HuggingFace Token</label>
+                <input type="password"
+                       class="wmd-settings-input"
+                       id="wmd-hf-token"
+                       placeholder="${this.settings?.huggingface_token_set ? '••••••••••••' : 'Enter your HuggingFace token'}"
+                       value="">
+                <span class="wmd-settings-status ${hfStatus}">${hfStatusText}</span>
+            </div>
+            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
+                Get your token at <a href="https://huggingface.co/settings/tokens" target="_blank" class="wmd-settings-link">huggingface.co/settings/tokens</a>
+                - Required for gated models (Flux, SD3, etc.)
+            </div>
+
+            <div class="wmd-settings-row">
+                <label class="wmd-settings-label">CivitAI API Key</label>
+                <input type="password"
+                       class="wmd-settings-input"
+                       id="wmd-civit-key"
+                       placeholder="${this.settings?.civitai_api_key_set ? '••••••••••••' : 'Enter your CivitAI API key'}"
+                       value="">
+                <span class="wmd-settings-status ${civitStatus}">${civitStatusText}</span>
+            </div>
+            <div class="wmd-settings-hint" style="margin-left: 152px;">
+                Get your API key at <a href="https://civitai.com/user/account" target="_blank" class="wmd-settings-link">civitai.com/user/account</a>
+                - Required for downloading from CivitAI
+            </div>
+
+            <div class="wmd-settings-actions">
+                <button class="wmd-btn wmd-btn-secondary" onclick="window.wmdInstance.clearSettings()">
+                    Clear All
+                </button>
+                <button class="wmd-btn wmd-btn-primary" onclick="window.wmdInstance.saveSettings()">
+                    Save Settings
+                </button>
+            </div>
+        `;
+
+        return panel;
+    }
+
+    async saveSettings() {
+        const hfToken = document.getElementById('wmd-hf-token')?.value || '';
+        const civitKey = document.getElementById('wmd-civit-key')?.value || '';
+
+        const data = {};
+
+        // Only include if user entered a new value
+        if (hfToken && !hfToken.startsWith('•')) {
+            data.huggingface_token = hfToken;
+        }
+        if (civitKey && !civitKey.startsWith('•')) {
+            data.civitai_api_key = civitKey;
+        }
+
+        // If no changes, just close settings
+        if (Object.keys(data).length === 0) {
+            this.showSettings = false;
+            const panel = document.getElementById("wmd-settings-panel");
+            if (panel) panel.remove();
+            return;
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                // Refresh settings and update UI
+                await this.loadSettings();
+
+                // Update status badges
+                const hfStatusEl = document.querySelector('#wmd-settings-panel .wmd-settings-row:first-of-type .wmd-settings-status');
+                const civitStatusEl = document.querySelector('#wmd-settings-panel .wmd-settings-row:last-of-type .wmd-settings-status');
+
+                if (hfStatusEl) {
+                    hfStatusEl.className = `wmd-settings-status ${this.settings.huggingface_token_set ? 'set' : 'not-set'}`;
+                    hfStatusEl.textContent = this.settings.huggingface_token_set ? 'Configured' : 'Not Set';
+                }
+                if (civitStatusEl) {
+                    civitStatusEl.className = `wmd-settings-status ${this.settings.civitai_api_key_set ? 'set' : 'not-set'}`;
+                    civitStatusEl.textContent = this.settings.civitai_api_key_set ? 'Configured' : 'Not Set';
+                }
+
+                // Clear input fields
+                document.getElementById('wmd-hf-token').value = '';
+                document.getElementById('wmd-civit-key').value = '';
+                document.getElementById('wmd-hf-token').placeholder = this.settings.huggingface_token_set ? '••••••••••••' : 'Enter your HuggingFace token';
+                document.getElementById('wmd-civit-key').placeholder = this.settings.civitai_api_key_set ? '••••••••••••' : 'Enter your CivitAI API key';
+
+                // Show success notification
+                this.showNotification('Settings saved successfully', 'success');
+            } else {
+                this.showNotification('Failed to save settings: ' + (result.error || 'Unknown error'), 'error');
+            }
+        } catch (error) {
+            console.error("[WMD] Save settings error:", error);
+            this.showNotification('Error saving settings: ' + error.message, 'error');
+        }
+    }
+
+    async clearSettings() {
+        if (!confirm('Are you sure you want to clear all API keys?')) {
+            return;
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/settings", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    huggingface_token: '',
+                    civitai_api_key: ''
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                await this.loadSettings();
+
+                // Update UI
+                const panel = document.getElementById("wmd-settings-panel");
+                if (panel) {
+                    panel.remove();
+                    const newPanel = this.createSettingsPanel();
+                    document.getElementById("wmd-body").insertBefore(newPanel, document.getElementById("wmd-body").firstChild);
+                }
+
+                this.showNotification('Settings cleared', 'success');
+            }
+        } catch (error) {
+            console.error("[WMD] Clear settings error:", error);
+            this.showNotification('Error clearing settings: ' + error.message, 'error');
+        }
+    }
+
+    showNotification(message, type = 'info') {
+        const toast = document.createElement('div');
+        toast.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #1a1a1a;
+            border: 1px solid ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+            border-radius: 8px;
+            padding: 16px 20px;
+            color: #fff;
+            font-size: 14px;
+            z-index: 10002;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            animation: wmd-slide-in 0.3s ease;
+        `;
+
+        const icon = type === 'success' ? '\u2713' : type === 'error' ? '\u2717' : '\u2139';
+        const color = type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3';
+
+        toast.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="color: ${color}; font-size: 20px;">${icon}</span>
+                <span>${message}</span>
+            </div>
+        `;
+
+        document.body.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.animation = 'wmd-slide-out 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
     }
 }
 

@@ -12,3 +12,6 @@ build/
 *.egg
 .DS_Store
 Thumbs.db
+
+# Settings file containing API keys
+settings.json

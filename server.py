@@ -22,9 +22,66 @@ routes = PromptServer.instance.routes
 # Extension path
 EXTENSION_PATH = os.path.dirname(__file__)
 
+# Settings file path
+SETTINGS_FILE = os.path.join(EXTENSION_PATH, 'settings.json')
+
 # Download progress tracking
 download_progress = {}
 download_lock = threading.Lock()
+
+# Settings cache
+_settings_cache = None
+
+
+def load_settings():
+    """Load settings from settings.json"""
+    global _settings_cache
+    if _settings_cache is not None:
+        return _settings_cache
+
+    default_settings = {
+        'huggingface_token': '',
+        'civitai_api_key': ''
+    }
+
+    try:
+        if os.path.exists(SETTINGS_FILE):
+            with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+                saved = json.load(f)
+                # Merge with defaults
+                _settings_cache = {**default_settings, **saved}
+                return _settings_cache
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Error loading settings: {e}")
+
+    _settings_cache = default_settings
+    return _settings_cache
+
+
+def save_settings(settings):
+    """Save settings to settings.json"""
+    global _settings_cache
+    try:
+        with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, indent=2)
+        _settings_cache = settings
+        logging.info("[Workflow-Models-Downloader] Settings saved")
+        return True
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Error saving settings: {e}")
+        return False
+
+
+def get_huggingface_token():
+    """Get HuggingFace token from settings"""
+    settings = load_settings()
+    return settings.get('huggingface_token', '')
+
+
+def get_civitai_api_key():
+    """Get CivitAI API key from settings"""
+    settings = load_settings()
+    return settings.get('civitai_api_key', '')
 
 logging.info("[Workflow-Models-Downloader] Loading extension...")
 
@@ -995,10 +1052,16 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'downloading'
 
+        # Get HuggingFace token if available
+        hf_token = get_huggingface_token()
+        headers = {}
+        if hf_token:
+            headers['Authorization'] = f'Bearer {hf_token}'
+
         # Get file size first
         try:
             url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_path}"
-            response = requests.head(url, allow_redirects=True, timeout=10)
+            response = requests.head(url, allow_redirects=True, timeout=10, headers=headers)
             total_size = int(response.headers.get('content-length', 0))
             with download_lock:
                 download_progress[download_id]['total_size'] = total_size
@@ -1017,7 +1080,7 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
         url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_path}"
         dest_file = os.path.join(target_path, filename)
 
-        response = requests.get(url, stream=True, timeout=30)
+        response = requests.get(url, stream=True, timeout=30, headers=headers)
         response.raise_for_status()
 
         total_size = int(response.headers.get('content-length', 0))
@@ -1056,8 +1119,23 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 
         dest_file = os.path.join(target_path, filename)
 
+        # Prepare headers based on URL source
+        headers = {}
+        if 'civitai.com' in url:
+            civitai_key = get_civitai_api_key()
+            if civitai_key:
+                # CivitAI uses token as query parameter
+                if '?' in url:
+                    url = f"{url}&token={civitai_key}"
+                else:
+                    url = f"{url}?token={civitai_key}"
+        elif 'huggingface.co' in url:
+            hf_token = get_huggingface_token()
+            if hf_token:
+                headers['Authorization'] = f'Bearer {hf_token}'
+
         # Download with progress
-        response = requests.get(url, stream=True, timeout=30, allow_redirects=True)
+        response = requests.get(url, stream=True, timeout=30, allow_redirects=True, headers=headers)
         response.raise_for_status()
 
         total_size = int(response.headers.get('content-length', 0))
@@ -1092,7 +1170,65 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.2.1")
+    return web.Response(text="1.3.0")
+
+
+@routes.get("/workflow-models/settings")
+async def get_settings(request):
+    """Get current settings (with masked tokens)"""
+    try:
+        settings = load_settings()
+        # Return masked versions for display
+        masked = {
+            'huggingface_token': mask_token(settings.get('huggingface_token', '')),
+            'civitai_api_key': mask_token(settings.get('civitai_api_key', '')),
+            'huggingface_token_set': bool(settings.get('huggingface_token', '')),
+            'civitai_api_key_set': bool(settings.get('civitai_api_key', ''))
+        }
+        return web.json_response(masked)
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Get settings error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/settings")
+async def update_settings(request):
+    """Update settings"""
+    try:
+        data = await request.json()
+        current = load_settings()
+
+        # Only update if new value is provided (not empty or masked)
+        if 'huggingface_token' in data:
+            token = data['huggingface_token']
+            if token and not token.startswith('***'):
+                current['huggingface_token'] = token
+            elif token == '':
+                current['huggingface_token'] = ''
+
+        if 'civitai_api_key' in data:
+            key = data['civitai_api_key']
+            if key and not key.startswith('***'):
+                current['civitai_api_key'] = key
+            elif key == '':
+                current['civitai_api_key'] = ''
+
+        if save_settings(current):
+            return web.json_response({'success': True})
+        else:
+            return web.json_response({'error': 'Failed to save settings'}, status=500)
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Update settings error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+def mask_token(token):
+    """Mask a token for display, showing only first 4 and last 4 characters"""
+    if not token:
+        return ''
+    if len(token) <= 8:
+        return '*' * len(token)
+    return token[:4] + '*' * (len(token) - 8) + token[-4:]
 
 
 logging.info("[Workflow-Models-Downloader] Extension loaded successfully")
