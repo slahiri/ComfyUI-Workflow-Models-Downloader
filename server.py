@@ -654,8 +654,17 @@ def scan_workflow_for_models(workflow_json):
     # ComfyUI stores model info in node.properties.models array
     node_models = {}  # filename -> {url, directory, node_type}
 
-    nodes = workflow_data.get('nodes', [])
-    for node in nodes:
+    # Collect all nodes including from subgraphs
+    all_nodes = list(workflow_data.get('nodes', []))
+
+    # Also check subgraph definitions for nested nodes
+    definitions = workflow_data.get('definitions', {})
+    subgraphs = definitions.get('subgraphs', [])
+    for subgraph in subgraphs:
+        subgraph_nodes = subgraph.get('nodes', [])
+        all_nodes.extend(subgraph_nodes)
+
+    for node in all_nodes:
         node_type = node.get('type', '')
         properties = node.get('properties', {})
         models_list = properties.get('models', [])
@@ -674,7 +683,7 @@ def scan_workflow_for_models(workflow_json):
                     }
 
     # Also check widgets_values for model filenames
-    for node in nodes:
+    for node in all_nodes:
         node_type = node.get('type', '')
         widgets_values = node.get('widgets_values', [])
 
