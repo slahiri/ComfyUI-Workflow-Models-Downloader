@@ -1634,6 +1634,51 @@ app.registerExtension({
     async setup() {
         console.log(`[Workflow-Models-Downloader] v${VERSION} initializing...`);
 
+        // Register settings in ComfyUI Settings panel
+        app.ui.settings.addSetting({
+            id: "WorkflowModelsDownloader.HuggingFaceToken",
+            category: ["Workflow Models Downloader", "API Keys", "HuggingFace"],
+            name: "HuggingFace Token",
+            tooltip: "Your HuggingFace access token for downloading gated models (Flux, SD3, etc.). Get it at huggingface.co/settings/tokens",
+            type: "text",
+            defaultValue: "",
+            onChange: async (value) => {
+                if (value && !value.startsWith('***')) {
+                    try {
+                        await api.fetchApi("/workflow-models/settings", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ huggingface_token: value })
+                        });
+                    } catch (e) {
+                        console.error("[WMD] Failed to save HuggingFace token:", e);
+                    }
+                }
+            }
+        });
+
+        app.ui.settings.addSetting({
+            id: "WorkflowModelsDownloader.CivitAIApiKey",
+            category: ["Workflow Models Downloader", "API Keys", "CivitAI"],
+            name: "CivitAI API Key",
+            tooltip: "Your CivitAI API key for downloading models. Get it at civitai.com/user/account",
+            type: "text",
+            defaultValue: "",
+            onChange: async (value) => {
+                if (value && !value.startsWith('***')) {
+                    try {
+                        await api.fetchApi("/workflow-models/settings", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ civitai_api_key: value })
+                        });
+                    } catch (e) {
+                        console.error("[WMD] Failed to save CivitAI API key:", e);
+                    }
+                }
+            }
+        });
+
         // Try new-style menu first
         try {
             const { ComfyButton } = await import("../../scripts/ui/components/button.js");
