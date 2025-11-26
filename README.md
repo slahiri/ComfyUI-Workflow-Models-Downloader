@@ -1,6 +1,6 @@
 # ComfyUI Workflow Models Downloader
 
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/slahiri/ComfyUI-Workflow-Models-Downloader/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/slahiri/ComfyUI-Workflow-Models-Downloader/tree/main)
+[![CircleCI](https://circleci.com/gh/slahiri/ComfyUI-Workflow-Models-Downloader/tree/main.svg?style=shield)](https://circleci.com/gh/slahiri/ComfyUI-Workflow-Models-Downloader?branch=main)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/slahiri/ComfyUI-Workflow-Models-Downloader.svg)](https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader/stargazers)
