@@ -25,6 +25,9 @@ EXTENSION_PATH = os.path.dirname(__file__)
 # Settings file path
 SETTINGS_FILE = os.path.join(EXTENSION_PATH, 'settings.json')
 
+# Search metadata cache file
+SEARCH_CACHE_FILE = os.path.join(EXTENSION_PATH, 'search_cache.json')
+
 # Download progress tracking
 download_progress = {}
 download_lock = threading.Lock()
@@ -42,7 +45,9 @@ def load_settings():
 
     default_settings = {
         'huggingface_token': '',
-        'civitai_api_key': ''
+        'civitai_api_key': '',
+        'tavily_api_key': '',
+        'enable_advanced_search': False
     }
 
     try:
@@ -83,6 +88,70 @@ def get_civitai_api_key():
     """Get CivitAI API key from settings"""
     settings = load_settings()
     return settings.get('civitai_api_key', '')
+
+
+def get_tavily_api_key():
+    """Get Tavily API key from settings"""
+    settings = load_settings()
+    return settings.get('tavily_api_key', '')
+
+
+def is_advanced_search_enabled():
+    """Check if advanced search is enabled"""
+    settings = load_settings()
+    return settings.get('enable_advanced_search', False) and bool(settings.get('tavily_api_key', ''))
+
+
+# Search metadata cache
+_search_cache = None
+
+
+def load_search_cache():
+    """Load search metadata cache from file"""
+    global _search_cache
+    if _search_cache is not None:
+        return _search_cache
+
+    try:
+        if os.path.exists(SEARCH_CACHE_FILE):
+            with open(SEARCH_CACHE_FILE, 'r', encoding='utf-8') as f:
+                _search_cache = json.load(f)
+                return _search_cache
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Error loading search cache: {e}")
+
+    _search_cache = {}
+    return _search_cache
+
+
+def save_search_cache(cache):
+    """Save search metadata cache to file"""
+    global _search_cache
+    try:
+        with open(SEARCH_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(cache, f, indent=2)
+        _search_cache = cache
+        return True
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Error saving search cache: {e}")
+        return False
+
+
+def get_cached_metadata(filename):
+    """Get cached search metadata for a filename"""
+    cache = load_search_cache()
+    return cache.get(filename)
+
+
+def save_search_metadata(filename, metadata):
+    """Save search metadata for a filename"""
+    cache = load_search_cache()
+    metadata['cached_at'] = json.dumps({"$date": str(os.path.getmtime(SEARCH_CACHE_FILE) if os.path.exists(SEARCH_CACHE_FILE) else 0)})
+    import datetime
+    metadata['cached_at'] = datetime.datetime.now().isoformat()
+    cache[filename] = metadata
+    save_search_cache(cache)
+
 
 logging.info("[Workflow-Models-Downloader] Loading extension...")
 
@@ -376,6 +445,130 @@ def search_civitai_api(filename):
 
     except Exception as e:
         logging.debug(f"[Workflow-Models-Downloader] CivitAI API search failed: {e}")
+
+    _url_search_cache[cache_key] = None
+    return None
+
+
+def search_tavily_api(filename):
+    """Search using Tavily API for model download URLs"""
+    global _url_search_cache
+
+    cache_key = f"tavily_{filename}"
+    if cache_key in _url_search_cache:
+        return _url_search_cache[cache_key]
+
+    tavily_key = get_tavily_api_key()
+    if not tavily_key:
+        return None
+
+    try:
+        import requests
+
+        # Build search query focused on finding download URLs
+        filename_base = os.path.splitext(filename)[0]
+        # Clean up common suffixes for better search
+        search_name = re.sub(r'[-_]?(fp16|fp8|bf16|e4m3fn|scaled|pruned|emaonly).*', '', filename_base, flags=re.IGNORECASE)
+
+        search_query = f"{search_name} safetensors download huggingface OR civitai"
+
+        url = "https://api.tavily.com/search"
+        payload = {
+            "api_key": tavily_key,
+            "query": search_query,
+            "search_depth": "advanced",
+            "include_domains": ["huggingface.co", "civitai.com", "github.com"],
+            "max_results": 10
+        }
+
+        response = requests.post(url, json=payload, timeout=15)
+
+        if response.status_code == 200:
+            data = response.json()
+            results = data.get('results', [])
+
+            # Look for direct download URLs in results
+            for result in results:
+                result_url = result.get('url', '')
+                content = result.get('content', '').lower()
+                title = result.get('title', '').lower()
+
+                # Check if this looks like a model page or download link
+                if 'huggingface.co' in result_url:
+                    # Try to construct download URL from HuggingFace page
+                    # Pattern: https://huggingface.co/{repo}/blob/main/{file}
+                    hf_pattern = r'huggingface\.co/([^/]+/[^/]+)(?:/(?:blob|tree)/[^/]+)?'
+                    match = re.search(hf_pattern, result_url)
+                    if match:
+                        repo = match.group(1)
+                        # Check if filename is mentioned in content or title
+                        if filename.lower() in content or filename_base.lower() in content:
+                            # Try to find the file in this repo
+                            try:
+                                files_url = f"https://huggingface.co/api/models/{repo}/tree/main"
+                                files_response = requests.get(files_url, timeout=10)
+                                if files_response.status_code == 200:
+                                    files = files_response.json()
+                                    for file_info in files:
+                                        file_path = file_info.get('path', '')
+                                        if file_path.endswith('.safetensors') or file_path.endswith('.ckpt'):
+                                            # Check if filename matches
+                                            if filename.lower() in file_path.lower() or filename_base.lower() in file_path.lower():
+                                                download_url = f"https://huggingface.co/{repo}/resolve/main/{file_path}"
+                                                _url_search_cache[cache_key] = {
+                                                    'url': download_url,
+                                                    'source': 'tavily_huggingface',
+                                                    'repo': repo,
+                                                    'tavily_result': result
+                                                }
+                                                logging.info(f"[Workflow-Models-Downloader] Tavily found {filename} on HuggingFace: {repo}")
+                                                return _url_search_cache[cache_key]
+                            except:
+                                pass
+
+                elif 'civitai.com' in result_url:
+                    # Extract model ID from CivitAI URL
+                    civit_pattern = r'civitai\.com/models/(\d+)'
+                    match = re.search(civit_pattern, result_url)
+                    if match:
+                        model_id = match.group(1)
+                        # Get model info from CivitAI API
+                        try:
+                            api_url = f"https://civitai.com/api/v1/models/{model_id}"
+                            api_response = requests.get(api_url, timeout=10)
+                            if api_response.status_code == 200:
+                                model_data = api_response.json()
+                                model_versions = model_data.get('modelVersions', [])
+                                for version in model_versions:
+                                    files = version.get('files', [])
+                                    for file_info in files:
+                                        file_name = file_info.get('name', '')
+                                        if filename.lower() in file_name.lower() or filename_base.lower() in file_name.lower():
+                                            download_url = file_info.get('downloadUrl', '')
+                                            if download_url:
+                                                _url_search_cache[cache_key] = {
+                                                    'url': download_url,
+                                                    'source': 'tavily_civitai',
+                                                    'model_name': model_data.get('name', ''),
+                                                    'civitai_url': result_url,
+                                                    'tavily_result': result
+                                                }
+                                                logging.info(f"[Workflow-Models-Downloader] Tavily found {filename} on CivitAI")
+                                                return _url_search_cache[cache_key]
+                        except:
+                            pass
+
+            # If no direct match found, return the most relevant result info
+            if results:
+                _url_search_cache[cache_key] = {
+                    'url': None,
+                    'results': results[:5],  # Return top 5 for user to choose
+                    'source': 'tavily_suggestions'
+                }
+                return _url_search_cache[cache_key]
+
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Tavily API search failed: {e}")
 
     _url_search_cache[cache_key] = None
     return None
@@ -913,6 +1106,9 @@ def scan_workflow_for_models(workflow_json):
         else:
             source = 'Unknown'
 
+        # Check for cached search metadata
+        cached_metadata = get_cached_metadata(model)
+
         models_data.append({
             'filename': model,
             'type': model_type,
@@ -925,7 +1121,8 @@ def scan_workflow_for_models(workflow_json):
             'hf_repo': hf_repo or '',
             'hf_path': hf_path or '',
             'node_type': node_type,
-            'url_source': url_source or ('workflow' if url else None)
+            'url_source': url_source or ('workflow' if url else None),
+            'search_metadata': cached_metadata
         })
 
     return models_data
@@ -1021,6 +1218,127 @@ async def search_model_url(request):
             })
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Search URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/advanced-search")
+async def advanced_search(request):
+    """Search for model URL using Tavily API (advanced search)"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+
+        if not filename:
+            return web.json_response({'error': 'Missing filename'}, status=400)
+
+        # Check if Tavily is configured
+        if not get_tavily_api_key():
+            return web.json_response({
+                'success': False,
+                'error': 'Tavily API key not configured'
+            }, status=400)
+
+        # Check cache first
+        cached = get_cached_metadata(filename)
+        if cached and cached.get('url'):
+            logging.info(f"[Workflow-Models-Downloader] Using cached result for: {filename}")
+            return web.json_response({
+                'success': True,
+                'url': cached['url'],
+                'source': cached.get('source', 'cached'),
+                'hf_repo': cached.get('hf_repo', ''),
+                'hf_path': cached.get('hf_path', ''),
+                'model_name': cached.get('model_name', ''),
+                'civitai_url': cached.get('civitai_url', ''),
+                'from_cache': True,
+                'metadata': cached
+            })
+
+        # Search with Tavily
+        result = search_tavily_api(filename)
+
+        if result:
+            if result.get('url'):
+                # Direct URL found
+                hf_repo, hf_path = extract_huggingface_info(result['url'])
+
+                # Build metadata to cache
+                metadata = {
+                    'url': result['url'],
+                    'source': result.get('source', 'tavily'),
+                    'hf_repo': hf_repo or result.get('repo', ''),
+                    'hf_path': hf_path or '',
+                    'model_name': result.get('model_name', ''),
+                    'civitai_url': result.get('civitai_url', ''),
+                    'search_method': 'tavily_advanced'
+                }
+
+                # Save to cache
+                save_search_metadata(filename, metadata)
+
+                return web.json_response({
+                    'success': True,
+                    'url': result['url'],
+                    'source': result.get('source', 'tavily'),
+                    'hf_repo': hf_repo or result.get('repo', ''),
+                    'hf_path': hf_path or '',
+                    'model_name': result.get('model_name', ''),
+                    'civitai_url': result.get('civitai_url', ''),
+                    'metadata': metadata
+                })
+            elif result.get('results'):
+                # Return suggestions for user to choose
+                suggestions = []
+                for r in result['results']:
+                    suggestions.append({
+                        'title': r.get('title', ''),
+                        'url': r.get('url', ''),
+                        'snippet': r.get('content', '')[:200] if r.get('content') else ''
+                    })
+
+                # Cache suggestions too
+                metadata = {
+                    'suggestions': suggestions,
+                    'search_method': 'tavily_suggestions'
+                }
+                save_search_metadata(filename, metadata)
+
+                return web.json_response({
+                    'success': True,
+                    'suggestions': suggestions,
+                    'message': 'No direct download URL found, but here are some relevant results'
+                })
+
+        return web.json_response({
+            'success': False,
+            'message': 'No results found for this model'
+        })
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Advanced search error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/search-cache/{filename}")
+async def get_search_cache(request):
+    """Get cached search metadata for a filename"""
+    try:
+        filename = request.match_info['filename']
+        # URL decode the filename
+        filename = urllib.parse.unquote(filename)
+
+        cached = get_cached_metadata(filename)
+        if cached:
+            return web.json_response({
+                'success': True,
+                'metadata': cached
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'message': 'No cached metadata found'
+            })
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Get search cache error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
 
@@ -1390,7 +1708,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.5.0")
+    return web.Response(text="1.6.0")
 
 
 @routes.get("/workflow-models/settings")
@@ -1402,8 +1720,11 @@ async def get_settings(request):
         masked = {
             'huggingface_token': mask_token(settings.get('huggingface_token', '')),
             'civitai_api_key': mask_token(settings.get('civitai_api_key', '')),
+            'tavily_api_key': mask_token(settings.get('tavily_api_key', '')),
             'huggingface_token_set': bool(settings.get('huggingface_token', '')),
-            'civitai_api_key_set': bool(settings.get('civitai_api_key', ''))
+            'civitai_api_key_set': bool(settings.get('civitai_api_key', '')),
+            'tavily_api_key_set': bool(settings.get('tavily_api_key', '')),
+            'enable_advanced_search': settings.get('enable_advanced_search', False)
         }
         return web.json_response(masked)
     except Exception as e:
@@ -1432,6 +1753,16 @@ async def update_settings(request):
                 current['civitai_api_key'] = key
             elif key == '':
                 current['civitai_api_key'] = ''
+
+        if 'tavily_api_key' in data:
+            key = data['tavily_api_key']
+            if key and not key.startswith('***'):
+                current['tavily_api_key'] = key
+            elif key == '':
+                current['tavily_api_key'] = ''
+
+        if 'enable_advanced_search' in data:
+            current['enable_advanced_search'] = bool(data['enable_advanced_search'])
 
         if save_settings(current):
             return web.json_response({'success': True})

@@ -15,3 +15,6 @@ Thumbs.db
 
 # Settings file containing API keys
 settings.json
+
+# Search cache file
+search_cache.json

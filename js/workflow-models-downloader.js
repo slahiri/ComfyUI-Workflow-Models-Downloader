@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -529,6 +529,118 @@ const styles = `
 .wmd-settings-link:hover {
     text-decoration: underline;
 }
+
+.wmd-filter-select {
+    background-color: #333;
+    color: #ddd;
+    border: 1px solid #555;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    cursor: pointer;
+    margin-right: 10px;
+}
+
+.wmd-filter-select:hover {
+    border-color: #777;
+}
+
+.wmd-filter-select:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+.wmd-header-controls {
+    display: flex;
+    align-items: center;
+}
+
+.wmd-info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: #2196F3;
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    font-style: italic;
+    font-family: Georgia, serif;
+    cursor: help;
+    margin-left: 6px;
+    position: relative;
+}
+
+.wmd-info-icon:hover {
+    background-color: #1976D2;
+}
+
+.wmd-info-tooltip {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 10px 12px;
+    min-width: 250px;
+    max-width: 350px;
+    z-index: 10003;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    font-style: normal;
+    font-family: inherit;
+    font-weight: normal;
+    font-size: 12px;
+    color: #ddd;
+    text-align: left;
+    display: none;
+    margin-bottom: 8px;
+}
+
+.wmd-info-icon:hover .wmd-info-tooltip {
+    display: block;
+}
+
+.wmd-info-tooltip::after {
+    content: '';
+    position: absolute;
+    top: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    border: 6px solid transparent;
+    border-top-color: #444;
+}
+
+.wmd-info-tooltip-row {
+    margin-bottom: 6px;
+}
+
+.wmd-info-tooltip-row:last-child {
+    margin-bottom: 0;
+}
+
+.wmd-info-tooltip-label {
+    color: #888;
+    font-size: 10px;
+    text-transform: uppercase;
+}
+
+.wmd-info-tooltip-value {
+    color: #fff;
+    word-break: break-all;
+}
+
+.wmd-info-tooltip-value a {
+    color: #5599ff;
+    text-decoration: none;
+}
+
+.wmd-info-tooltip-value a:hover {
+    text-decoration: underline;
+}
 `;
 
 // Add styles to document
@@ -545,6 +657,7 @@ class WorkflowModelsDownloader {
         this.progressInterval = null;
         this.showSettings = false;
         this.settings = null;
+        this.currentFilter = "all"; // all, existing, ready, unknown
     }
 
     async show() {
@@ -635,7 +748,17 @@ class WorkflowModelsDownloader {
             $el("div.wmd-modal", [
                 $el("div.wmd-modal-header", [
                     $el("h2.wmd-modal-title", ["Workflow Models Downloader"]),
-                    $el("div", { style: { display: "flex", alignItems: "center" } }, [
+                    $el("div.wmd-header-controls", [
+                        $el("select.wmd-filter-select", {
+                            id: "wmd-filter-select",
+                            onchange: (e) => this.onFilterChange(e.target.value),
+                            title: "Filter models"
+                        }, [
+                            $el("option", { value: "all" }, ["All Models"]),
+                            $el("option", { value: "existing" }, ["Existing Models"]),
+                            $el("option", { value: "ready" }, ["Ready For Download"]),
+                            $el("option", { value: "unknown" }, ["Missing URLs / Unknown"])
+                        ]),
                         $el("button.wmd-settings-btn", {
                             onclick: () => this.toggleSettings(),
                             title: "Settings"
@@ -670,6 +793,9 @@ class WorkflowModelsDownloader {
 
     async scanWorkflow() {
         try {
+            // Load settings first (for advanced search button display)
+            await this.loadSettings();
+
             // Get current workflow from app
             const workflow = app.graph.serialize();
 
@@ -790,6 +916,7 @@ class WorkflowModelsDownloader {
                 // Has URL - show download button
                 const btnClass = model.exists ? "wmd-btn-warning" : "wmd-btn-primary";
                 const btnText = model.exists ? "Re-download" : "Download";
+                const infoIcon = this.buildMetadataInfoIcon(model);
                 actionCell = `
                     <div class="wmd-action-cell">
                         <div class="wmd-action-buttons">
@@ -798,6 +925,7 @@ class WorkflowModelsDownloader {
                                     onclick="window.wmdInstance.downloadModel(${index})">
                                 ${btnText}
                             </button>
+                            ${infoIcon}
                         </div>
                         <div id="wmd-progress-${index}" style="display:none;">
                             <div style="display: flex; align-items: center; gap: 8px;">
@@ -825,15 +953,25 @@ class WorkflowModelsDownloader {
                     </button>
                 ` : '';
 
+                // Check if advanced search is enabled
+                const advancedSearchEnabled = this.settings?.enable_advanced_search && this.settings?.tavily_api_key_set;
+                const searchBtnText = advancedSearchEnabled ? 'Advanced Search' : 'Search URL';
+                const searchBtnClass = advancedSearchEnabled ? 'wmd-btn-warning' : 'wmd-btn-info';
+                const searchBtnHandler = advancedSearchEnabled ? 'advancedSearch' : 'searchUrl';
+
+                // Show info icon if there's cached suggestions
+                const suggestionsIcon = this.buildSuggestionsInfoIcon(model);
+
                 actionCell = `
                     <div class="wmd-action-cell">
                         <div class="wmd-action-buttons">
-                            <button class="wmd-btn wmd-btn-info wmd-btn-small"
+                            <button class="wmd-btn ${searchBtnClass} wmd-btn-small"
                                     id="wmd-search-btn-${index}"
-                                    onclick="window.wmdInstance.searchUrl(${index})">
-                                Search URL
+                                    onclick="window.wmdInstance.${searchBtnHandler}(${index})">
+                                ${searchBtnText}
                             </button>
                             ${hashLookupBtn}
+                            ${suggestionsIcon}
                         </div>
                         <div class="wmd-url-input-row" id="wmd-url-row-${index}">
                             <input type="text" class="wmd-url-input"
@@ -899,6 +1037,13 @@ class WorkflowModelsDownloader {
 
         // Make instance accessible for onclick handlers
         window.wmdInstance = this;
+
+        // Restore filter selection and apply filter
+        const filterSelect = document.getElementById("wmd-filter-select");
+        if (filterSelect) {
+            filterSelect.value = this.currentFilter;
+        }
+        this.applyFilter();
     }
 
     async searchUrl(index) {
@@ -945,6 +1090,112 @@ class WorkflowModelsDownloader {
                 searchBtn.textContent = "Search URL";
             }
         }
+    }
+
+    async advancedSearch(index) {
+        const model = this.models[index];
+        if (!model) return;
+
+        const searchBtn = document.getElementById(`wmd-search-btn-${index}`);
+        if (searchBtn) {
+            searchBtn.disabled = true;
+            searchBtn.textContent = "Searching...";
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/advanced-search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ filename: model.filename })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.url) {
+                // Direct URL found - store metadata
+                model.url = result.url;
+                model.hf_repo = result.hf_repo || '';
+                model.hf_path = result.hf_path || '';
+                model.url_source = result.source;
+                model.source = result.hf_repo ? 'HuggingFace' : 'Direct';
+                model.search_metadata = result.metadata || {
+                    url: result.url,
+                    source: result.source,
+                    model_name: result.model_name,
+                    civitai_url: result.civitai_url,
+                    hf_repo: result.hf_repo,
+                    from_cache: result.from_cache
+                };
+
+                // Show notification instead of alert
+                const fromCache = result.from_cache ? ' (cached)' : '';
+                this.showNotification(`Found URL for ${model.filename}${fromCache}`, 'success');
+
+                // Re-render the row with URL and info icon
+                this.updateRowWithUrl(index);
+            } else if (result.suggestions && result.suggestions.length > 0) {
+                // Store suggestions as metadata
+                model.search_metadata = {
+                    suggestions: result.suggestions,
+                    search_method: 'tavily_suggestions'
+                };
+
+                // Show notification
+                this.showNotification(`Found ${result.suggestions.length} suggestions for ${model.filename}. Check info icon for details.`, 'info');
+
+                // Add info icon to show suggestions
+                this.addSuggestionsInfoIcon(index, result.suggestions);
+
+                if (searchBtn) {
+                    searchBtn.disabled = false;
+                    searchBtn.textContent = "Advanced Search";
+                }
+            } else {
+                this.showNotification(`No results found for ${model.filename}`, 'error');
+                if (searchBtn) {
+                    searchBtn.disabled = false;
+                    searchBtn.textContent = "Advanced Search";
+                }
+            }
+        } catch (error) {
+            console.error("[WMD] Advanced search error:", error);
+            this.showNotification(`Search error: ${error.message}`, 'error');
+            if (searchBtn) {
+                searchBtn.disabled = false;
+                searchBtn.textContent = "Advanced Search";
+            }
+        }
+    }
+
+    addSuggestionsInfoIcon(index, suggestions) {
+        const actionButtons = document.querySelector(`#wmd-row-${index} .wmd-action-buttons`);
+        if (!actionButtons) return;
+
+        // Remove existing info icon if any
+        const existingIcon = actionButtons.querySelector('.wmd-info-icon');
+        if (existingIcon) existingIcon.remove();
+
+        // Build suggestions tooltip content
+        let tooltipContent = suggestions.map((s, i) => `
+            <div class="wmd-info-tooltip-row">
+                <div class="wmd-info-tooltip-label">Result ${i + 1}</div>
+                <div class="wmd-info-tooltip-value">
+                    <a href="${s.url}" target="_blank">${s.title || s.url}</a>
+                </div>
+            </div>
+        `).join('');
+
+        const infoIcon = document.createElement('span');
+        infoIcon.className = 'wmd-info-icon';
+        infoIcon.innerHTML = `i<div class="wmd-info-tooltip">
+            <div class="wmd-info-tooltip-row">
+                <div class="wmd-info-tooltip-label">Search Suggestions</div>
+                <div class="wmd-info-tooltip-value" style="color: #888; font-size: 11px;">Click links to find model</div>
+            </div>
+            ${tooltipContent}
+        </div>`;
+
+        actionButtons.appendChild(infoIcon);
     }
 
     async lookupHash(index) {
@@ -1057,6 +1308,9 @@ class WorkflowModelsDownloader {
             sourceCell.innerHTML = `<span style="color:#888;">Direct URL</span>${sourceBadge}`;
         }
 
+        // Build info icon if metadata exists
+        const infoIcon = this.buildMetadataInfoIcon(model);
+
         // Update action column with download button
         const actionCell = row.cells[5];
         const btnClass = model.exists ? "wmd-btn-warning" : "wmd-btn-primary";
@@ -1069,6 +1323,7 @@ class WorkflowModelsDownloader {
                             onclick="window.wmdInstance.downloadModel(${index})">
                         ${btnText}
                     </button>
+                    ${infoIcon}
                 </div>
                 <div id="wmd-progress-${index}" style="display:none;">
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -1087,6 +1342,103 @@ class WorkflowModelsDownloader {
         `;
 
         this.updateSummary();
+    }
+
+    buildMetadataInfoIcon(model) {
+        const metadata = model.search_metadata;
+        if (!metadata) return '';
+
+        let tooltipRows = [];
+
+        if (metadata.source) {
+            tooltipRows.push(`
+                <div class="wmd-info-tooltip-row">
+                    <div class="wmd-info-tooltip-label">Source</div>
+                    <div class="wmd-info-tooltip-value">${metadata.source}</div>
+                </div>
+            `);
+        }
+
+        if (metadata.model_name) {
+            tooltipRows.push(`
+                <div class="wmd-info-tooltip-row">
+                    <div class="wmd-info-tooltip-label">Model Name</div>
+                    <div class="wmd-info-tooltip-value">${metadata.model_name}</div>
+                </div>
+            `);
+        }
+
+        if (metadata.hf_repo) {
+            tooltipRows.push(`
+                <div class="wmd-info-tooltip-row">
+                    <div class="wmd-info-tooltip-label">HuggingFace Repo</div>
+                    <div class="wmd-info-tooltip-value">
+                        <a href="https://huggingface.co/${metadata.hf_repo}" target="_blank">${metadata.hf_repo}</a>
+                    </div>
+                </div>
+            `);
+        }
+
+        if (metadata.civitai_url) {
+            tooltipRows.push(`
+                <div class="wmd-info-tooltip-row">
+                    <div class="wmd-info-tooltip-label">CivitAI Page</div>
+                    <div class="wmd-info-tooltip-value">
+                        <a href="${metadata.civitai_url}" target="_blank">View on CivitAI</a>
+                    </div>
+                </div>
+            `);
+        }
+
+        if (metadata.cached_at) {
+            const cachedDate = new Date(metadata.cached_at).toLocaleDateString();
+            tooltipRows.push(`
+                <div class="wmd-info-tooltip-row">
+                    <div class="wmd-info-tooltip-label">Cached</div>
+                    <div class="wmd-info-tooltip-value">${cachedDate}</div>
+                </div>
+            `);
+        }
+
+        if (tooltipRows.length === 0) return '';
+
+        return `
+            <span class="wmd-info-icon">i
+                <div class="wmd-info-tooltip">
+                    <div class="wmd-info-tooltip-row">
+                        <div class="wmd-info-tooltip-label" style="font-size: 11px; color: #4CAF50;">Search Metadata</div>
+                    </div>
+                    ${tooltipRows.join('')}
+                </div>
+            </span>
+        `;
+    }
+
+    buildSuggestionsInfoIcon(model) {
+        const metadata = model.search_metadata;
+        if (!metadata || !metadata.suggestions || metadata.suggestions.length === 0) return '';
+
+        const suggestions = metadata.suggestions;
+        let tooltipContent = suggestions.slice(0, 5).map((s, i) => `
+            <div class="wmd-info-tooltip-row">
+                <div class="wmd-info-tooltip-label">Result ${i + 1}</div>
+                <div class="wmd-info-tooltip-value">
+                    <a href="${s.url}" target="_blank">${s.title || 'View Link'}</a>
+                </div>
+            </div>
+        `).join('');
+
+        return `
+            <span class="wmd-info-icon" style="background-color: #FF9800;">i
+                <div class="wmd-info-tooltip">
+                    <div class="wmd-info-tooltip-row">
+                        <div class="wmd-info-tooltip-label" style="font-size: 11px; color: #FF9800;">Previous Search Results</div>
+                        <div class="wmd-info-tooltip-value" style="color: #888; font-size: 11px;">Click links to find model manually</div>
+                    </div>
+                    ${tooltipContent}
+                </div>
+            </span>
+        `;
     }
 
     async downloadFromManualUrl(index) {
@@ -1221,12 +1573,6 @@ class WorkflowModelsDownloader {
         const missing = total - existing;
         const downloadable = this.models.filter(m => !m.exists && m.url).length;
 
-        // Update footer
-        const footerInfo = document.getElementById("wmd-footer-info");
-        if (footerInfo) {
-            footerInfo.textContent = `Total: ${total} | Existing: ${existing} | Missing: ${missing}`;
-        }
-
         // Update download all button
         const downloadAllBtn = document.getElementById("wmd-download-all-btn");
         if (downloadAllBtn) {
@@ -1235,6 +1581,68 @@ class WorkflowModelsDownloader {
                 downloadAllBtn.textContent = `Download All Missing (${downloadable})`;
             } else {
                 downloadAllBtn.style.display = "none";
+            }
+        }
+
+        // Re-apply filter to update row visibility and footer counts
+        this.applyFilter();
+    }
+
+    getFilteredModels() {
+        switch (this.currentFilter) {
+            case "existing":
+                return this.models.filter(m => m.exists);
+            case "ready":
+                return this.models.filter(m => !m.exists && m.url);
+            case "unknown":
+                return this.models.filter(m => !m.exists && !m.url);
+            default:
+                return this.models;
+        }
+    }
+
+    onFilterChange(filter) {
+        this.currentFilter = filter;
+        this.applyFilter();
+    }
+
+    applyFilter() {
+        // Show/hide rows based on filter
+        for (let i = 0; i < this.models.length; i++) {
+            const model = this.models[i];
+            const row = document.getElementById(`wmd-row-${i}`);
+            if (!row) continue;
+
+            let show = false;
+            switch (this.currentFilter) {
+                case "existing":
+                    show = model.exists;
+                    break;
+                case "ready":
+                    show = !model.exists && model.url;
+                    break;
+                case "unknown":
+                    show = !model.exists && !model.url;
+                    break;
+                default:
+                    show = true;
+            }
+
+            row.style.display = show ? "" : "none";
+        }
+
+        // Update filter count in footer
+        const filteredCount = this.getFilteredModels().length;
+        const footerInfo = document.getElementById("wmd-footer-info");
+        if (footerInfo) {
+            const total = this.models.length;
+            const existing = this.models.filter(m => m.exists).length;
+            const missing = total - existing;
+
+            if (this.currentFilter === "all") {
+                footerInfo.textContent = `Total: ${total} | Existing: ${existing} | Missing: ${missing}`;
+            } else {
+                footerInfo.textContent = `Showing: ${filteredCount} | Total: ${total} | Existing: ${existing} | Missing: ${missing}`;
             }
         }
     }
@@ -1503,6 +1911,9 @@ class WorkflowModelsDownloader {
         const hfStatusText = this.settings?.huggingface_token_set ? 'Configured' : 'Not Set';
         const civitStatus = this.settings?.civitai_api_key_set ? 'set' : 'not-set';
         const civitStatusText = this.settings?.civitai_api_key_set ? 'Configured' : 'Not Set';
+        const tavilyStatus = this.settings?.tavily_api_key_set ? 'set' : 'not-set';
+        const tavilyStatusText = this.settings?.tavily_api_key_set ? 'Configured' : 'Not Set';
+        const advancedSearchEnabled = this.settings?.enable_advanced_search || false;
 
         panel.innerHTML = `
             <div class="wmd-settings-title">
@@ -1532,9 +1943,40 @@ class WorkflowModelsDownloader {
                        value="">
                 <span class="wmd-settings-status ${civitStatus}">${civitStatusText}</span>
             </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px;">
+            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
                 Get your API key at <a href="https://civitai.com/user/account" target="_blank" class="wmd-settings-link">civitai.com/user/account</a>
                 - Required for downloading from CivitAI
+            </div>
+
+            <div class="wmd-settings-row">
+                <label class="wmd-settings-label">Tavily API Key</label>
+                <input type="password"
+                       class="wmd-settings-input"
+                       id="wmd-tavily-key"
+                       placeholder="${this.settings?.tavily_api_key_set ? '••••••••••••' : 'Enter your Tavily API key'}"
+                       value="">
+                <span class="wmd-settings-status ${tavilyStatus}">${tavilyStatusText}</span>
+            </div>
+            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
+                Get your API key at <a href="https://tavily.com" target="_blank" class="wmd-settings-link">tavily.com</a>
+                - Required for Advanced Search feature
+            </div>
+
+            <div class="wmd-settings-row" style="margin-top: 10px;">
+                <label class="wmd-settings-label">Advanced Search</label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="checkbox"
+                           id="wmd-advanced-search-enabled"
+                           ${advancedSearchEnabled ? 'checked' : ''}
+                           ${!this.settings?.tavily_api_key_set ? 'disabled' : ''}
+                           style="width: 18px; height: 18px; cursor: pointer;">
+                    <span style="color: ${this.settings?.tavily_api_key_set ? '#ddd' : '#666'};">
+                        Enable Advanced Search (uses Tavily AI)
+                    </span>
+                </label>
+            </div>
+            <div class="wmd-settings-hint" style="margin-left: 152px;">
+                When enabled, replaces "Search URL" with "Advanced Search" using AI-powered web search
             </div>
 
             <div class="wmd-settings-actions">
@@ -1553,6 +1995,8 @@ class WorkflowModelsDownloader {
     async saveSettings() {
         const hfToken = document.getElementById('wmd-hf-token')?.value || '';
         const civitKey = document.getElementById('wmd-civit-key')?.value || '';
+        const tavilyKey = document.getElementById('wmd-tavily-key')?.value || '';
+        const advancedSearchEnabled = document.getElementById('wmd-advanced-search-enabled')?.checked || false;
 
         const data = {};
 
@@ -1563,9 +2007,18 @@ class WorkflowModelsDownloader {
         if (civitKey && !civitKey.startsWith('•')) {
             data.civitai_api_key = civitKey;
         }
+        if (tavilyKey && !tavilyKey.startsWith('•')) {
+            data.tavily_api_key = tavilyKey;
+        }
 
-        // If no changes, just close settings
-        if (Object.keys(data).length === 0) {
+        // Always save the checkbox state
+        data.enable_advanced_search = advancedSearchEnabled;
+
+        // If only checkbox changed (no new keys), still save
+        const hasNewKeys = Object.keys(data).filter(k => k !== 'enable_advanced_search').length > 0;
+        const checkboxChanged = advancedSearchEnabled !== this.settings?.enable_advanced_search;
+
+        if (!hasNewKeys && !checkboxChanged) {
             this.showSettings = false;
             const panel = document.getElementById("wmd-settings-panel");
             if (panel) panel.remove();
@@ -1626,7 +2079,9 @@ class WorkflowModelsDownloader {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     huggingface_token: '',
-                    civitai_api_key: ''
+                    civitai_api_key: '',
+                    tavily_api_key: '',
+                    enable_advanced_search: false
                 })
             });
 
@@ -1846,6 +2301,48 @@ app.registerExtension({
                     } catch (e) {
                         console.error("[WMD] Failed to save CivitAI API key:", e);
                     }
+                }
+            }
+        });
+
+        app.ui.settings.addSetting({
+            id: "WorkflowModelsDownloader.TavilyApiKey",
+            category: ["Workflow Models Downloader", "API Keys", "Tavily"],
+            name: "Tavily API Key",
+            tooltip: "Your Tavily API key for Advanced Search feature. Get it at tavily.com",
+            type: "text",
+            defaultValue: "",
+            onChange: async (value) => {
+                if (value && !value.startsWith('***')) {
+                    try {
+                        await api.fetchApi("/workflow-models/settings", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ tavily_api_key: value })
+                        });
+                    } catch (e) {
+                        console.error("[WMD] Failed to save Tavily API key:", e);
+                    }
+                }
+            }
+        });
+
+        app.ui.settings.addSetting({
+            id: "WorkflowModelsDownloader.EnableAdvancedSearch",
+            category: ["Workflow Models Downloader", "Features"],
+            name: "Enable Advanced Search",
+            tooltip: "When enabled, uses Tavily AI-powered search instead of basic URL search. Requires Tavily API key.",
+            type: "boolean",
+            defaultValue: false,
+            onChange: async (value) => {
+                try {
+                    await api.fetchApi("/workflow-models/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ enable_advanced_search: value })
+                    });
+                } catch (e) {
+                    console.error("[WMD] Failed to save Advanced Search setting:", e);
                 }
             }
         });
