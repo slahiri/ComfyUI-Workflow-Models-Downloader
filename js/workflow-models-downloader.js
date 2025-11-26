@@ -1005,16 +1005,17 @@ class WorkflowModelsDownloader {
 
     async cancelDownload(index) {
         const model = this.models[index];
-        if (!model || !model.download_id) return;
+        const downloadId = this.downloads[index];
+        if (!model || !downloadId) return;
 
         const cancelBtn = document.getElementById(`wmd-cancel-${index}`);
         if (cancelBtn) {
             cancelBtn.disabled = true;
-            cancelBtn.textContent = "Cancelling...";
+            cancelBtn.style.opacity = "0.5";
         }
 
         try {
-            const response = await api.fetchApi(`/workflow-models/cancel/${model.download_id}`, {
+            const response = await api.fetchApi(`/workflow-models/cancel/${encodeURIComponent(downloadId)}`, {
                 method: "POST"
             });
 
@@ -1037,7 +1038,7 @@ class WorkflowModelsDownloader {
             console.error("[WMD] Cancel download error:", error);
             if (cancelBtn) {
                 cancelBtn.disabled = false;
-                cancelBtn.textContent = "Cancel";
+                cancelBtn.style.opacity = "1";
             }
         }
     }
