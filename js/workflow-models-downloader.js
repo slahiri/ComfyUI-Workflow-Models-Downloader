@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.4.0";
+const VERSION = "1.5.0";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -219,6 +219,15 @@ const styles = `
 
 .wmd-btn-warning:hover {
     background-color: #f57c00;
+}
+
+.wmd-btn-danger {
+    background-color: #f44336;
+    color: white;
+}
+
+.wmd-btn-danger:hover {
+    background-color: #d32f2f;
 }
 
 .wmd-btn-info {
@@ -772,6 +781,11 @@ class WorkflowModelsDownloader {
                                 <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
                             </div>
                             <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
+                            <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
+                                    onclick="window.wmdInstance.cancelDownload(${index})"
+                                    style="margin-top: 5px;">
+                                Cancel
+                            </button>
                         </div>
                     </div>
                 `;
@@ -811,6 +825,11 @@ class WorkflowModelsDownloader {
                                 <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
                             </div>
                             <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
+                            <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
+                                    onclick="window.wmdInstance.cancelDownload(${index})"
+                                    style="margin-top: 5px;">
+                                Cancel
+                            </button>
                         </div>
                     </div>
                 `;
@@ -957,6 +976,45 @@ class WorkflowModelsDownloader {
         }
     }
 
+    async cancelDownload(index) {
+        const model = this.models[index];
+        if (!model || !model.download_id) return;
+
+        const cancelBtn = document.getElementById(`wmd-cancel-${index}`);
+        if (cancelBtn) {
+            cancelBtn.disabled = true;
+            cancelBtn.textContent = "Cancelling...";
+        }
+
+        try {
+            const response = await api.fetchApi(`/workflow-models/cancel/${model.download_id}`, {
+                method: "POST"
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.updateDownloadStatus(index, "cancelled", "Download cancelled");
+
+                // Hide progress, show download button again
+                const progressDiv = document.getElementById(`wmd-progress-${index}`);
+                const dlBtn = document.getElementById(`wmd-dl-btn-${index}`);
+
+                if (progressDiv) progressDiv.style.display = "none";
+                if (dlBtn) {
+                    dlBtn.style.display = "inline-block";
+                    dlBtn.disabled = false;
+                }
+            }
+        } catch (error) {
+            console.error("[WMD] Cancel download error:", error);
+            if (cancelBtn) {
+                cancelBtn.disabled = false;
+                cancelBtn.textContent = "Cancel";
+            }
+        }
+    }
+
     updateRowWithUrl(index) {
         const model = this.models[index];
         const row = document.getElementById(`wmd-row-${index}`);
@@ -989,6 +1047,11 @@ class WorkflowModelsDownloader {
                         <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
                     </div>
                     <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
+                    <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
+                            onclick="window.wmdInstance.cancelDownload(${index})"
+                            style="margin-top: 5px;">
+                        Cancel
+                    </button>
                 </div>
             </div>
         `;

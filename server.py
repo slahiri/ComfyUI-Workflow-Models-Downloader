@@ -28,6 +28,7 @@ SETTINGS_FILE = os.path.join(EXTENSION_PATH, 'settings.json')
 # Download progress tracking
 download_progress = {}
 download_lock = threading.Lock()
+cancelled_downloads = set()  # Track cancelled download IDs
 
 # Settings cache
 _settings_cache = None
@@ -1196,14 +1197,38 @@ async def get_all_progress(request):
         return web.json_response(dict(download_progress))
 
 
+@routes.post("/workflow-models/cancel/{download_id}")
+async def cancel_download(request):
+    """Cancel a download"""
+    download_id = request.match_info['download_id']
+
+    with download_lock:
+        if download_id in download_progress:
+            cancelled_downloads.add(download_id)
+            download_progress[download_id]['status'] = 'cancelled'
+            logging.info(f"[Workflow-Models-Downloader] Cancelled download: {download_id}")
+            return web.json_response({'success': True, 'message': 'Download cancelled'})
+        else:
+            return web.json_response({'error': 'Download not found'}, status=404)
+
+
 def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
     """Background thread to download a model"""
     try:
         from huggingface_hub import hf_hub_download
         import requests
 
-        target_path = os.path.join(folder_paths.models_dir, target_dir)
-        os.makedirs(target_path, exist_ok=True)
+        # Normalize path separators for the OS
+        target_dir_normalized = target_dir.replace('/', os.sep).replace('\\', os.sep)
+        target_path = os.path.join(folder_paths.models_dir, target_dir_normalized)
+
+        # Create directory if it doesn't exist
+        try:
+            os.makedirs(target_path, exist_ok=True)
+            logging.info(f"[Workflow-Models-Downloader] Target directory: {target_path}")
+        except Exception as dir_error:
+            logging.error(f"[Workflow-Models-Downloader] Failed to create directory {target_path}: {dir_error}")
+            raise
 
         with download_lock:
             download_progress[download_id]['status'] = 'downloading'
@@ -1244,6 +1269,18 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
 
         with open(dest_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
+                # Check for cancellation
+                if download_id in cancelled_downloads:
+                    logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
+                    f.close()
+                    # Try to delete partial file
+                    try:
+                        os.remove(dest_file)
+                    except:
+                        pass
+                    cancelled_downloads.discard(download_id)
+                    return
+
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
@@ -1260,6 +1297,9 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = str(e)
+    finally:
+        # Clean up cancelled flag
+        cancelled_downloads.discard(download_id)
 
 
 def _download_from_url_thread(download_id, url, filename, target_dir):
@@ -1267,8 +1307,17 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
     try:
         import requests
 
-        target_path = os.path.join(folder_paths.models_dir, target_dir)
-        os.makedirs(target_path, exist_ok=True)
+        # Normalize path separators for the OS
+        target_dir_normalized = target_dir.replace('/', os.sep).replace('\\', os.sep)
+        target_path = os.path.join(folder_paths.models_dir, target_dir_normalized)
+
+        # Create directory if it doesn't exist
+        try:
+            os.makedirs(target_path, exist_ok=True)
+            logging.info(f"[Workflow-Models-Downloader] Target directory: {target_path}")
+        except Exception as dir_error:
+            logging.error(f"[Workflow-Models-Downloader] Failed to create directory {target_path}: {dir_error}")
+            raise
 
         with download_lock:
             download_progress[download_id]['status'] = 'downloading'
@@ -1302,6 +1351,18 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 
         with open(dest_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
+                # Check for cancellation
+                if download_id in cancelled_downloads:
+                    logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
+                    f.close()
+                    # Try to delete partial file
+                    try:
+                        os.remove(dest_file)
+                    except:
+                        pass
+                    cancelled_downloads.discard(download_id)
+                    return
+
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
@@ -1321,12 +1382,15 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = str(e)
+    finally:
+        # Clean up cancelled flag
+        cancelled_downloads.discard(download_id)
 
 
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.4.0")
+    return web.Response(text="1.5.0")
 
 
 @routes.get("/workflow-models/settings")
