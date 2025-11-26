@@ -153,6 +153,26 @@ def save_search_metadata(filename, metadata):
     save_search_cache(cache)
 
 
+def _cache_download_url(filename, url, source, hf_repo=None, hf_path=None, model_name=None, civitai_url=None):
+    """Cache URL after successful download for future use"""
+    import datetime
+    try:
+        metadata = {
+            'url': url,
+            'source': f'download_{source}',
+            'hf_repo': hf_repo or '',
+            'hf_path': hf_path or '',
+            'model_name': model_name or '',
+            'civitai_url': civitai_url or '',
+            'cached_at': datetime.datetime.now().isoformat(),
+            'from_download': True
+        }
+        save_search_metadata(filename, metadata)
+        logging.info(f"[Workflow-Models-Downloader] Cached URL for: {filename}")
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Failed to cache URL: {e}")
+
+
 logging.info("[Workflow-Models-Downloader] Loading extension...")
 
 
@@ -1075,15 +1095,28 @@ def scan_workflow_for_models(workflow_json):
                     target_dir = directory
                     break
 
+        # Check for cached search metadata first
+        cached_metadata = get_cached_metadata(model)
+
         # If no URL found, try to find one from our registries (not API search - that's manual)
         url_source = None
         if not url:
-            found_url, url_source = find_model_url(model, search_apis=False)
-            if found_url:
-                url = found_url
+            # First check cache for previously downloaded/found URLs
+            if cached_metadata and cached_metadata.get('url'):
+                url = cached_metadata['url']
+                url_source = cached_metadata.get('source', 'cached')
+            else:
+                found_url, url_source = find_model_url(model, search_apis=False)
+                if found_url:
+                    url = found_url
 
         # Extract HuggingFace info
         hf_repo, hf_path = extract_huggingface_info(url)
+
+        # If we got URL from cache, also get hf_repo/hf_path from cache
+        if cached_metadata and not hf_repo:
+            hf_repo = cached_metadata.get('hf_repo', '')
+            hf_path = cached_metadata.get('hf_path', '')
 
         # Check if model exists
         exists, local_size = check_model_exists(target_dir, model)
@@ -1105,9 +1138,6 @@ def scan_workflow_for_models(workflow_json):
             source = url_source
         else:
             source = 'Unknown'
-
-        # Check for cached search metadata
-        cached_metadata = get_cached_metadata(model)
 
         models_data.append({
             'filename': model,
@@ -1608,6 +1638,10 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
             download_progress[download_id]['status'] = 'completed'
             download_progress[download_id]['progress'] = 100
 
+        # Cache the URL for future use
+        hf_url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_path}"
+        _cache_download_url(filename, hf_url, 'huggingface', hf_repo=hf_repo, hf_path=hf_path)
+
         logging.info(f"[Workflow-Models-Downloader] Downloaded: {filename}")
 
     except Exception as e:
@@ -1692,6 +1726,11 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'completed'
             download_progress[download_id]['progress'] = 100
+
+        # Cache the URL for future use
+        source = 'civitai' if 'civitai.com' in url else ('huggingface' if 'huggingface.co' in url else 'direct')
+        hf_repo, hf_path = extract_huggingface_info(url)
+        _cache_download_url(filename, url, source, hf_repo=hf_repo, hf_path=hf_path)
 
         logging.info(f"[Workflow-Models-Downloader] Downloaded from URL: {filename}")
 
