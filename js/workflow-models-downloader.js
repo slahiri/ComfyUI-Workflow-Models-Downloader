@@ -230,6 +230,29 @@ const styles = `
     background-color: #d32f2f;
 }
 
+.wmd-cancel-btn {
+    background: none;
+    border: 1px solid #666;
+    color: #999;
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.wmd-cancel-btn:hover {
+    background-color: #f44336;
+    border-color: #f44336;
+    color: white;
+}
+
 .wmd-btn-info {
     background-color: #2196F3;
     color: white;
@@ -777,15 +800,17 @@ class WorkflowModelsDownloader {
                             </button>
                         </div>
                         <div id="wmd-progress-${index}" style="display:none;">
-                            <div class="wmd-progress-bar">
-                                <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="wmd-progress-bar" style="flex: 1;">
+                                    <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                                </div>
+                                <button class="wmd-cancel-btn" id="wmd-cancel-${index}"
+                                        onclick="window.wmdInstance.cancelDownload(${index})"
+                                        title="Cancel download">
+                                    \u00D7
+                                </button>
                             </div>
                             <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
-                            <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
-                                    onclick="window.wmdInstance.cancelDownload(${index})"
-                                    style="margin-top: 5px;">
-                                Cancel
-                            </button>
                         </div>
                     </div>
                 `;
@@ -821,15 +846,17 @@ class WorkflowModelsDownloader {
                             </button>
                         </div>
                         <div id="wmd-progress-${index}" style="display:none;">
-                            <div class="wmd-progress-bar">
-                                <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <div class="wmd-progress-bar" style="flex: 1;">
+                                    <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                                </div>
+                                <button class="wmd-cancel-btn" id="wmd-cancel-${index}"
+                                        onclick="window.wmdInstance.cancelDownload(${index})"
+                                        title="Cancel download">
+                                    \u00D7
+                                </button>
                             </div>
                             <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
-                            <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
-                                    onclick="window.wmdInstance.cancelDownload(${index})"
-                                    style="margin-top: 5px;">
-                                Cancel
-                            </button>
                         </div>
                     </div>
                 `;
@@ -1043,15 +1070,17 @@ class WorkflowModelsDownloader {
                     </button>
                 </div>
                 <div id="wmd-progress-${index}" style="display:none;">
-                    <div class="wmd-progress-bar">
-                        <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div class="wmd-progress-bar" style="flex: 1;">
+                            <div class="wmd-progress-fill" id="wmd-progress-fill-${index}" style="width: 0%"></div>
+                        </div>
+                        <button class="wmd-cancel-btn" id="wmd-cancel-${index}"
+                                onclick="window.wmdInstance.cancelDownload(${index})"
+                                title="Cancel download">
+                            \u00D7
+                        </button>
                     </div>
                     <div class="wmd-download-status" id="wmd-status-${index}">Starting...</div>
-                    <button class="wmd-btn wmd-btn-danger wmd-btn-small" id="wmd-cancel-${index}"
-                            onclick="window.wmdInstance.cancelDownload(${index})"
-                            style="margin-top: 5px;">
-                        Cancel
-                    </button>
                 </div>
             </div>
         `;
@@ -1331,6 +1360,7 @@ class WorkflowModelsDownloader {
         const statusDiv = document.getElementById(`wmd-status-${index}`);
         const dlBtn = document.getElementById(`wmd-dl-btn-${index}`);
         const statusCell = document.getElementById(`wmd-status-cell-${index}`);
+        const cancelBtn = document.getElementById(`wmd-cancel-${index}`);
 
         if (progressFill) {
             progressFill.style.width = `${progress.progress || 0}%`;
@@ -1340,6 +1370,9 @@ class WorkflowModelsDownloader {
             if (progress.status === "completed") {
                 statusDiv.textContent = "Completed!";
                 statusDiv.style.color = "#4CAF50";
+
+                // Hide cancel button on completion
+                if (cancelBtn) cancelBtn.style.display = "none";
 
                 // Update model status
                 this.models[index].exists = true;
@@ -1363,7 +1396,15 @@ class WorkflowModelsDownloader {
             } else if (progress.status === "error") {
                 statusDiv.textContent = `Error: ${progress.error}`;
                 statusDiv.style.color = "#f44336";
+                // Hide cancel button on error
+                if (cancelBtn) cancelBtn.style.display = "none";
                 if (dlBtn) dlBtn.style.display = "inline-block";
+
+            } else if (progress.status === "cancelled") {
+                statusDiv.textContent = "Cancelled";
+                statusDiv.style.color = "#ff9800";
+                // Hide cancel button
+                if (cancelBtn) cancelBtn.style.display = "none";
 
             } else if (progress.status === "downloading") {
                 const downloaded = this.formatSize(progress.downloaded || 0);
