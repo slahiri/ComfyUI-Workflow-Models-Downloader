@@ -2,7 +2,7 @@
 
 A ComfyUI extension that automatically detects models in your workflow and helps download missing ones from HuggingFace and CivitAI.
 
-![Screenshot](https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader/raw/master/screenshot.png)
+![Screenshot](https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader/raw/main/screenshot.png)
 
 ## Features
 
