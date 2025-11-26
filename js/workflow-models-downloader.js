@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -776,7 +776,16 @@ class WorkflowModelsDownloader {
                     </div>
                 `;
             } else {
-                // No URL - show search and manual input options
+                // No URL - show search, hash lookup (if exists), and manual input options
+                const hashLookupBtn = model.exists ? `
+                    <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
+                            id="wmd-hash-btn-${index}"
+                            onclick="window.wmdInstance.lookupHash(${index})"
+                            title="Calculate file hash and lookup on CivitAI">
+                        Lookup Hash
+                    </button>
+                ` : '';
+
                 actionCell = `
                     <div class="wmd-action-cell">
                         <div class="wmd-action-buttons">
@@ -785,6 +794,7 @@ class WorkflowModelsDownloader {
                                     onclick="window.wmdInstance.searchUrl(${index})">
                                 Search URL
                             </button>
+                            ${hashLookupBtn}
                         </div>
                         <div class="wmd-url-input-row" id="wmd-url-row-${index}">
                             <input type="text" class="wmd-url-input"
@@ -887,6 +897,62 @@ class WorkflowModelsDownloader {
             if (searchBtn) {
                 searchBtn.disabled = false;
                 searchBtn.textContent = "Search URL";
+            }
+        }
+    }
+
+    async lookupHash(index) {
+        const model = this.models[index];
+        if (!model || !model.exists) return;
+
+        const hashBtn = document.getElementById(`wmd-hash-btn-${index}`);
+        if (hashBtn) {
+            hashBtn.disabled = true;
+            hashBtn.textContent = "Calculating...";
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/lookup-hash", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    filename: model.filename,
+                    directory: model.directory
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.url) {
+                // Update model with found URL
+                model.url = result.url;
+                model.url_source = 'civitai_hash';
+                model.civitai_url = result.civitai_url;
+                model.civitai_model_name = result.model_name;
+
+                // Show success message with model info
+                const info = `Found on CivitAI!\n\nModel: ${result.model_name}\nType: ${result.model_type}\nVersion: ${result.version_name}\nOriginal filename: ${result.original_filename}\n\nCivitAI page: ${result.civitai_url}`;
+                alert(info);
+
+                // Re-render the row with download button
+                this.updateRowWithUrl(index);
+            } else {
+                const msg = result.hash
+                    ? `Model not found on CivitAI.\n\nSHA256: ${result.hash.substring(0, 16)}...\n\nThis model may not be from CivitAI, or may have been modified.`
+                    : `Could not calculate hash or lookup failed.`;
+                alert(msg);
+
+                if (hashBtn) {
+                    hashBtn.disabled = false;
+                    hashBtn.textContent = "Lookup Hash";
+                }
+            }
+        } catch (error) {
+            console.error("[WMD] Hash lookup error:", error);
+            alert(`Error looking up hash: ${error.message}`);
+            if (hashBtn) {
+                hashBtn.disabled = false;
+                hashBtn.textContent = "Lookup Hash";
             }
         }
     }

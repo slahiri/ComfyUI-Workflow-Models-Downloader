@@ -567,6 +567,93 @@ def identify_model_type_from_filename(model_name):
         return None, None
 
 
+def calculate_file_hash(filepath, algorithm='sha256'):
+    """Calculate SHA256 hash of a file (first 10MB for speed)"""
+    import hashlib
+    hash_obj = hashlib.new(algorithm)
+
+    try:
+        with open(filepath, 'rb') as f:
+            # Read first 10MB for quick hash (CivitAI uses full file hash though)
+            # For accurate lookup, we need the full hash
+            while chunk := f.read(8192 * 1024):  # 8MB chunks
+                hash_obj.update(chunk)
+        return hash_obj.hexdigest()
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Hash calculation error: {e}")
+        return None
+
+
+def lookup_civitai_by_hash(file_hash):
+    """Look up model on CivitAI by SHA256 hash"""
+    if not file_hash:
+        return None
+
+    try:
+        import requests
+        url = f"https://civitai.com/api/v1/model-versions/by-hash/{file_hash}"
+        response = requests.get(url, timeout=15)
+
+        if response.status_code == 200:
+            data = response.json()
+
+            # Extract relevant info
+            model_info = {
+                'model_name': data.get('model', {}).get('name', 'Unknown'),
+                'model_type': data.get('model', {}).get('type', 'Unknown'),
+                'version_name': data.get('name', ''),
+                'model_id': data.get('modelId'),
+                'version_id': data.get('id'),
+                'download_url': None,
+                'original_filename': None
+            }
+
+            # Find download URL from files
+            files = data.get('files', [])
+            for f in files:
+                hashes = f.get('hashes', {})
+                if hashes.get('SHA256', '').lower() == file_hash.lower():
+                    model_info['download_url'] = f.get('downloadUrl')
+                    model_info['original_filename'] = f.get('name')
+                    break
+
+            # Fallback to first file if hash match not found
+            if not model_info['download_url'] and files:
+                model_info['download_url'] = files[0].get('downloadUrl')
+                model_info['original_filename'] = files[0].get('name')
+
+            return model_info
+
+        return None
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] CivitAI hash lookup error: {e}")
+        return None
+
+
+def find_model_file_path(target_dir, filename):
+    """Find the full path to a model file"""
+    models_dir = folder_paths.models_dir
+
+    dirs_to_check = [target_dir]
+    if target_dir in EQUIVALENT_DIRECTORIES:
+        dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
+
+    for check_dir in dirs_to_check:
+        # Check exact path
+        model_path = os.path.join(models_dir, check_dir, filename)
+        if os.path.exists(model_path):
+            return model_path
+
+        # Search subdirectories
+        base_dir = os.path.join(models_dir, check_dir)
+        if os.path.exists(base_dir):
+            for root, dirs, files in os.walk(base_dir):
+                if filename in files:
+                    return os.path.join(root, filename)
+
+    return None
+
+
 def extract_huggingface_info(url):
     """Extract HuggingFace repo and filename from URL"""
     if not url or 'huggingface.co' not in url:
@@ -936,6 +1023,66 @@ async def search_model_url(request):
         return web.json_response({'error': str(e)}, status=500)
 
 
+@routes.post("/workflow-models/lookup-hash")
+async def lookup_by_hash(request):
+    """Look up model on CivitAI by calculating file hash"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+        directory = data.get('directory')
+
+        if not filename or not directory:
+            return web.json_response({'error': 'Missing filename or directory'}, status=400)
+
+        # Find the model file
+        filepath = find_model_file_path(directory, filename)
+
+        if not filepath:
+            return web.json_response({
+                'success': False,
+                'message': 'Model file not found locally'
+            })
+
+        # Calculate hash (this may take time for large files)
+        logging.info(f"[Workflow-Models-Downloader] Calculating hash for: {filename}")
+        file_hash = calculate_file_hash(filepath)
+
+        if not file_hash:
+            return web.json_response({
+                'success': False,
+                'message': 'Failed to calculate file hash'
+            })
+
+        logging.info(f"[Workflow-Models-Downloader] Hash: {file_hash[:16]}... Looking up on CivitAI")
+
+        # Look up on CivitAI
+        model_info = lookup_civitai_by_hash(file_hash)
+
+        if model_info and model_info.get('download_url'):
+            return web.json_response({
+                'success': True,
+                'hash': file_hash,
+                'model_name': model_info.get('model_name'),
+                'model_type': model_info.get('model_type'),
+                'version_name': model_info.get('version_name'),
+                'original_filename': model_info.get('original_filename'),
+                'url': model_info.get('download_url'),
+                'model_id': model_info.get('model_id'),
+                'civitai_url': f"https://civitai.com/models/{model_info.get('model_id')}" if model_info.get('model_id') else None,
+                'source': 'civitai_hash'
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'hash': file_hash,
+                'message': 'Model not found on CivitAI'
+            })
+
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Hash lookup error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
 @routes.post("/workflow-models/download-url")
 async def download_from_url(request):
     """Download a model from a direct URL"""
@@ -1179,7 +1326,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.3.0")
+    return web.Response(text="1.4.0")
 
 
 @routes.get("/workflow-models/settings")
