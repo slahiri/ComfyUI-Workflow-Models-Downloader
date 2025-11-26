@@ -1,0 +1,147 @@
+{
+  "version": "1.0.0",
+  "description": "Curated list of popular models with download URLs",
+  "models": {
+    "v1-5-pruned-emaonly.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "v1-5-pruned-emaonly-fp16.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned-emaonly.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints",
+      "note": "FP16 version - same source file"
+    },
+    "v1-5-pruned.safetensors": {
+      "url": "https://huggingface.co/runwayml/stable-diffusion-v1-5/resolve/main/v1-5-pruned.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd_xl_base_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd_xl_refiner_1.0.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-xl-refiner-1.0/resolve/main/sd_xl_refiner_1.0.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd3_medium_incl_clips_t5xxlfp8.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3-medium/resolve/main/sd3_medium_incl_clips_t5xxlfp8.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "sd3.5_large.safetensors": {
+      "url": "https://huggingface.co/stabilityai/stable-diffusion-3.5-large/resolve/main/sd3.5_large.safetensors",
+      "type": "checkpoint",
+      "directory": "checkpoints"
+    },
+    "flux1-dev.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/flux1-dev.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "flux1-schnell.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-schnell/resolve/main/flux1-schnell.safetensors",
+      "type": "diffusion_model",
+      "directory": "diffusion_models"
+    },
+    "ae.safetensors": {
+      "url": "https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/main/ae.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "clip_l.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors",
+      "type": "clip",
+      "directory": "clip"
+    },
+    "t5xxl_fp16.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "t5xxl_fp8_e4m3fn.safetensors": {
+      "url": "https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp8_e4m3fn.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "sdxl_vae.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sdxl-vae/resolve/main/sdxl_vae.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "vae-ft-mse-840000-ema-pruned.safetensors": {
+      "url": "https://huggingface.co/stabilityai/sd-vae-ft-mse-original/resolve/main/vae-ft-mse-840000-ema-pruned.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    },
+    "RealESRGAN_x4plus.pth": {
+      "url": "https://huggingface.co/ai-forever/Real-ESRGAN/resolve/main/RealESRGAN_x4plus.pth",
+      "type": "upscaler",
+      "directory": "upscale_models"
+    },
+    "4x-UltraSharp.pth": {
+      "url": "https://huggingface.co/Kim2091/4x-UltraSharp/resolve/main/4x-UltraSharp.pth",
+      "type": "upscaler",
+      "directory": "upscale_models"
+    },
+    "codeformer.pth": {
+      "url": "https://huggingface.co/facefusion/codeformer/resolve/main/codeformer.pth",
+      "type": "face_restore",
+      "directory": "facerestore_models"
+    },
+    "control_v11p_sd15_canny.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_canny.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "control_v11p_sd15_openpose.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11p_sd15_openpose.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "control_v11f1p_sd15_depth.pth": {
+      "url": "https://huggingface.co/lllyasviel/ControlNet-v1-1/resolve/main/control_v11f1p_sd15_depth.pth",
+      "type": "controlnet",
+      "directory": "controlnet"
+    },
+    "ip-adapter_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter_sd15.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "ip-adapter-plus_sd15.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/models/ip-adapter-plus_sd15.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "ip-adapter_sdxl.safetensors": {
+      "url": "https://huggingface.co/h94/IP-Adapter/resolve/main/sdxl_models/ip-adapter_sdxl.safetensors",
+      "type": "ipadapter",
+      "directory": "ipadapter"
+    },
+    "sam_vit_h_4b8939.pth": {
+      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_h_4b8939.pth",
+      "type": "sam",
+      "directory": "sams"
+    },
+    "sam_vit_b_01ec64.pth": {
+      "url": "https://huggingface.co/ybelkada/segment-anything/resolve/main/checkpoints/sam_vit_b_01ec64.pth",
+      "type": "sam",
+      "directory": "sams"
+    },
+    "umt5-xxl-enc-bf16.safetensors": {
+      "url": "https://huggingface.co/ALGOTECH/WanVideo_comfy/resolve/main/umt5-xxl-enc-bf16.safetensors",
+      "type": "text_encoder",
+      "directory": "text_encoders"
+    },
+    "wan_2.1_vae.safetensors": {
+      "url": "https://huggingface.co/Comfy-Org/Wan_2.1_ComfyUI_repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors",
+      "type": "vae",
+      "directory": "vae"
+    }
+  }
+}

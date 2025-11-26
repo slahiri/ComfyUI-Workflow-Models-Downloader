@@ -1,0 +1,2 @@
+requests
+huggingface_hub
