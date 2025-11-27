@@ -1,0 +1,21 @@
+[project]
+name = "comfyui-workflow-models-downloader"
+description = "Scan workflows for required models and download them automatically from HuggingFace, CivitAI, and other sources. Features include filter dropdowns, Tavily AI-powered advanced search, metadata caching, and automatic URL restoration."
+version = "1.7.0"
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "huggingface_hub",
+]
+
+[project.urls]
+Repository = "https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader"
+Documentation = "https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader#readme"
+"Bug Tracker" = "https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader/issues"
+
+[tool.comfy]
+PublisherId = "slahiri"
+DisplayName = "Workflow Models Downloader"
+Icon = "https://raw.githubusercontent.com/slahiri/ComfyUI-Workflow-Models-Downloader/main/screenshot.png"
