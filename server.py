@@ -33,8 +33,22 @@ download_progress = {}
 download_lock = threading.Lock()
 cancelled_downloads = set()  # Track cancelled download IDs
 
+# Download queue system
+download_queue = []  # Queued downloads waiting to start
+download_queue_lock = threading.Lock()
+max_parallel_downloads = 3  # Default, configurable via settings
+active_download_count = 0
+
+# Model aliases file
+MODEL_ALIASES_FILE = os.path.join(EXTENSION_PATH, 'metadata', 'model-aliases.json')
+
 # Settings cache
 _settings_cache = None
+
+# Fuzzy matching imports
+from difflib import SequenceMatcher
+import subprocess
+import shutil
 
 
 def load_settings():
@@ -904,8 +918,8 @@ EQUIVALENT_DIRECTORIES = {
 
 
 def check_model_exists(target_dir, filename):
-    """Check if model file exists in target directory, equivalent directories, or subdirectories.
-    Supports extra_model_paths.yaml configurations."""
+    """Check if model file exists using ComfyUI's folder_paths system.
+    This ensures we match exactly what ComfyUI can find and load."""
 
     # Get list of directories to check (including equivalent ones)
     dirs_to_check = [target_dir]
@@ -913,41 +927,32 @@ def check_model_exists(target_dir, filename):
         dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
 
     for check_dir in dirs_to_check:
-        # Get all configured paths for this folder type (includes extra_model_paths.yaml)
         try:
-            all_paths = folder_paths.get_folder_paths(check_dir)
-        except:
-            # Fallback to default models_dir if folder type not found
-            all_paths = [os.path.join(folder_paths.models_dir, check_dir)]
+            # Use ComfyUI's get_filename_list which returns all files ComfyUI can find
+            # This respects extra_model_paths.yaml and subdirectory structure
+            available_files = folder_paths.get_filename_list(check_dir)
 
-        for base_path in all_paths:
-            # Check exact path
-            model_path = os.path.join(base_path, filename)
-            if os.path.exists(model_path):
-                try:
-                    size_bytes = os.path.getsize(model_path)
-                    size_mb = size_bytes / (1024 * 1024)
-                    if size_mb >= 1024:
-                        return True, f"{size_mb/1024:.2f} GB"
-                    else:
-                        return True, f"{size_mb:.1f} MB"
-                except:
-                    return True, None
-
-            # Search in subdirectories (common for loras, checkpoints, etc.)
-            if os.path.exists(base_path):
-                for root, dirs, files in os.walk(base_path):
-                    if filename in files:
-                        try:
-                            found_path = os.path.join(root, filename)
-                            size_bytes = os.path.getsize(found_path)
-                            size_mb = size_bytes / (1024 * 1024)
-                            if size_mb >= 1024:
-                                return True, f"{size_mb/1024:.2f} GB"
-                            else:
-                                return True, f"{size_mb:.1f} MB"
-                        except:
-                            return True, None
+            # Check if the exact filename is in the list
+            # ComfyUI returns files with relative paths like "subfolder/file.safetensors"
+            # We only match exact paths - if workflow says "model.safetensors" but file is at
+            # "subfolder/model.safetensors", it won't work in ComfyUI either
+            if filename in available_files:
+                # Found it - get the full path to check size
+                full_path = folder_paths.get_full_path(check_dir, filename)
+                if full_path and os.path.exists(full_path):
+                    try:
+                        size_bytes = os.path.getsize(full_path)
+                        size_mb = size_bytes / (1024 * 1024)
+                        if size_mb >= 1024:
+                            return True, f"{size_mb/1024:.2f} GB"
+                        else:
+                            return True, f"{size_mb:.1f} MB"
+                    except:
+                        return True, None
+        except Exception as e:
+            # Fallback: folder type might not exist in ComfyUI
+            logging.debug(f"[WMD] Could not check {check_dir}: {e}")
+            continue
 
     return False, None
 
@@ -1864,6 +1869,928 @@ def mask_token(token):
     if len(token) <= 8:
         return '*' * len(token)
     return token[:4] + '*' * (len(token) - 8) + token[-4:]
+
+
+# ============================================================================
+# Model Browser Endpoints
+# ============================================================================
+
+def format_size(size_bytes):
+    """Format file size in human-readable format"""
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    elif size_bytes < 1024 * 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+    else:
+        return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+@routes.get("/workflow-models/installed")
+async def get_installed_models(request):
+    """Get all installed models with metadata"""
+    try:
+        models = []
+
+        # Model types to scan
+        model_types = [
+            'checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'clip_vision',
+            'text_encoders', 'diffusion_models', 'unet', 'embeddings',
+            'upscale_models', 'hypernetworks', 'gligen', 'style_models',
+            'ipadapter', 'instantid', 'photomaker', 'pulid', 'sams',
+            'depthanything', 'groundingdino', 'insightface', 'animatediff_models',
+            'vae_approx'
+        ]
+
+        for folder_type in model_types:
+            try:
+                files = folder_paths.get_filename_list(folder_type)
+
+                for filename in files:
+                    try:
+                        full_path = folder_paths.get_full_path(folder_type, filename)
+                        if full_path and os.path.exists(full_path):
+                            stat = os.stat(full_path)
+                            models.append({
+                                'filename': filename,
+                                'type': folder_type,
+                                'path': full_path,
+                                'size': stat.st_size,
+                                'modified': stat.st_mtime,
+                                'size_human': format_size(stat.st_size)
+                            })
+                    except Exception as e:
+                        logging.debug(f"[WMD] Error processing {filename}: {e}")
+                        continue
+            except Exception as e:
+                logging.debug(f"[WMD] Error scanning {folder_type}: {e}")
+                continue
+
+        return web.json_response({'models': models})
+    except Exception as e:
+        logging.error(f"[WMD] Error getting installed models: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/model/metadata")
+async def get_model_metadata(request):
+    """Get detailed metadata for a model file"""
+    try:
+        path = request.query.get('path', '')
+        if not path:
+            return web.json_response({'error': 'Path is required'}, status=400)
+
+        if not os.path.exists(path):
+            return web.json_response({'error': 'File not found'}, status=404)
+
+        # Security check - ensure path is within models directories
+        models_dir = folder_paths.models_dir
+        if not os.path.abspath(path).startswith(os.path.abspath(models_dir)):
+            # Also check extra_model_paths
+            valid_path = False
+            for folder_type in ['checkpoints', 'loras', 'vae', 'controlnet']:
+                try:
+                    for base_path in folder_paths.get_folder_paths(folder_type):
+                        if os.path.abspath(path).startswith(os.path.abspath(base_path)):
+                            valid_path = True
+                            break
+                except:
+                    pass
+                if valid_path:
+                    break
+
+            if not valid_path:
+                return web.json_response({'error': 'Access denied'}, status=403)
+
+        stat = os.stat(path)
+        filename = os.path.basename(path)
+
+        # Determine model type from directory structure
+        model_type = 'unknown'
+        for folder_type in ['checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'embeddings', 'upscale_models']:
+            try:
+                for base_path in folder_paths.get_folder_paths(folder_type):
+                    if path.startswith(base_path):
+                        model_type = folder_type
+                        break
+            except:
+                pass
+
+        metadata = {
+            'filename': filename,
+            'path': path,
+            'type': model_type,
+            'size': stat.st_size,
+            'size_human': format_size(stat.st_size),
+            'modified': stat.st_mtime,
+            'hash': None  # Optional: compute hash on request
+        }
+
+        return web.json_response(metadata)
+    except Exception as e:
+        logging.error(f"[WMD] Error getting model metadata: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/model/delete")
+async def delete_model(request):
+    """Delete a model file"""
+    try:
+        data = await request.json()
+        path = data.get('path', '')
+
+        if not path:
+            return web.json_response({'error': 'Path is required'}, status=400)
+
+        if not os.path.exists(path):
+            return web.json_response({'error': 'File not found'}, status=404)
+
+        # Security check - ensure path is within models directories
+        models_dir = folder_paths.models_dir
+        valid_path = os.path.abspath(path).startswith(os.path.abspath(models_dir))
+
+        if not valid_path:
+            # Also check extra_model_paths
+            for folder_type in ['checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'embeddings', 'upscale_models']:
+                try:
+                    for base_path in folder_paths.get_folder_paths(folder_type):
+                        if os.path.abspath(path).startswith(os.path.abspath(base_path)):
+                            valid_path = True
+                            break
+                except:
+                    pass
+                if valid_path:
+                    break
+
+        if not valid_path:
+            return web.json_response({'error': 'Access denied - path not in models directory'}, status=403)
+
+        # Ensure it's a file, not a directory
+        if not os.path.isfile(path):
+            return web.json_response({'error': 'Path is not a file'}, status=400)
+
+        # Delete the file
+        os.remove(path)
+        logging.info(f"[WMD] Deleted model: {path}")
+
+        return web.json_response({'success': True})
+    except Exception as e:
+        logging.error(f"[WMD] Error deleting model: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# ============================================================================
+# Fuzzy Matching System
+# ============================================================================
+
+def load_model_aliases():
+    """Load model aliases from model-aliases.json"""
+    try:
+        if os.path.exists(MODEL_ALIASES_FILE):
+            with open(MODEL_ALIASES_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        logging.error(f"[WMD] Error loading model aliases: {e}")
+
+    # Default aliases structure
+    return {
+        "aliases": {},
+        "patterns": [
+            {"pattern": r"(.+)[-_]?fp16\.safetensors$", "base": "$1.safetensors"},
+            {"pattern": r"(.+)[-_]?fp8\.safetensors$", "base": "$1.safetensors"},
+            {"pattern": r"(.+)[-_]?bf16\.safetensors$", "base": "$1.safetensors"},
+            {"pattern": r"(.+)[-_]?q8_0\.safetensors$", "base": "$1.safetensors"},
+            {"pattern": r"(.+)[-_]?pruned\.safetensors$", "base": "$1.safetensors"},
+            {"pattern": r"(.+)[-_]?ema\.safetensors$", "base": "$1.safetensors"}
+        ]
+    }
+
+
+def resolve_model_alias(filename):
+    """Check if filename is an alias for a known model and return canonical name"""
+    aliases_data = load_model_aliases()
+    filename_lower = filename.lower()
+
+    # Direct alias lookup
+    for canonical, alias_list in aliases_data.get('aliases', {}).items():
+        if filename_lower in [a.lower() for a in alias_list]:
+            return canonical
+
+    # Pattern matching (for quantization variants)
+    for pattern_def in aliases_data.get('patterns', []):
+        match = re.match(pattern_def['pattern'], filename, re.IGNORECASE)
+        if match:
+            base = pattern_def['base'].replace('$1', match.group(1))
+            return base
+
+    return filename  # No alias found
+
+
+def fuzzy_match_model(filename, threshold=0.70):
+    """Find similar models with confidence scores"""
+    matches = []
+    base_name = os.path.splitext(filename)[0].lower()
+
+    # First, check if this is an alias
+    canonical = resolve_model_alias(filename)
+    if canonical != filename:
+        # Found via alias - this is a 100% match for the canonical name
+        matches.append({
+            'matched_name': canonical,
+            'confidence': 100,
+            'match_type': 'alias',
+            'url': None  # Will be looked up separately
+        })
+
+    # Search in model-list.json
+    model_list = load_model_list()
+    for model in model_list:
+        model_filename = model.get('filename', '')
+        model_base = os.path.splitext(model_filename)[0].lower()
+
+        # Exact match
+        if model_base == base_name:
+            matches.append({
+                'filename': model_filename,
+                'url': model.get('url', ''),
+                'confidence': 100,
+                'match_type': 'exact',
+                'source': 'model_list'
+            })
+            continue
+
+        # Fuzzy match using SequenceMatcher
+        ratio = SequenceMatcher(None, base_name, model_base).ratio()
+        if ratio >= threshold:
+            matches.append({
+                'filename': model_filename,
+                'url': model.get('url', ''),
+                'confidence': int(ratio * 100),
+                'match_type': 'fuzzy',
+                'source': 'model_list'
+            })
+
+    # Search in popular-models.json
+    popular_models = load_popular_models()
+    for model_name, model_info in popular_models.items():
+        model_base = os.path.splitext(model_name)[0].lower()
+
+        # Exact match
+        if model_base == base_name:
+            matches.append({
+                'filename': model_name,
+                'url': model_info.get('url', ''),
+                'confidence': 100,
+                'match_type': 'exact',
+                'source': 'popular_models'
+            })
+            continue
+
+        # Fuzzy match
+        ratio = SequenceMatcher(None, base_name, model_base).ratio()
+        if ratio >= threshold:
+            matches.append({
+                'filename': model_name,
+                'url': model_info.get('url', ''),
+                'confidence': int(ratio * 100),
+                'match_type': 'fuzzy',
+                'source': 'popular_models'
+            })
+
+    # Search in search_cache.json for previously found models
+    search_cache = load_search_cache()
+    for cached_name, cached_info in search_cache.items():
+        cached_base = os.path.splitext(cached_name)[0].lower()
+
+        # Exact match
+        if cached_base == base_name:
+            matches.append({
+                'filename': cached_name,
+                'url': cached_info.get('url', ''),
+                'confidence': 100,
+                'match_type': 'exact',
+                'source': 'search_cache'
+            })
+            continue
+
+        # Fuzzy match
+        ratio = SequenceMatcher(None, base_name, cached_base).ratio()
+        if ratio >= threshold:
+            matches.append({
+                'filename': cached_name,
+                'url': cached_info.get('url', ''),
+                'confidence': int(ratio * 100),
+                'match_type': 'fuzzy',
+                'source': 'search_cache'
+            })
+
+    # Remove duplicates (keep highest confidence)
+    seen = {}
+    for match in matches:
+        key = match.get('filename', match.get('matched_name', ''))
+        if key not in seen or match['confidence'] > seen[key]['confidence']:
+            seen[key] = match
+
+    # Sort by confidence descending
+    unique_matches = list(seen.values())
+    unique_matches.sort(key=lambda x: x['confidence'], reverse=True)
+
+    return unique_matches[:5]  # Top 5 matches
+
+
+@routes.post("/workflow-models/fuzzy-match")
+async def fuzzy_match_endpoint(request):
+    """Find similar models using fuzzy matching"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+        threshold = data.get('threshold', 0.70)
+
+        if not filename:
+            return web.json_response({'error': 'Missing filename'}, status=400)
+
+        matches = fuzzy_match_model(filename, threshold)
+
+        return web.json_response({
+            'success': True,
+            'filename': filename,
+            'matches': matches
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Fuzzy match error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# ============================================================================
+# URL Analysis for Raw Downloads
+# ============================================================================
+
+def guess_model_type_from_filename(filename, url_path=''):
+    """Guess the model type and directory from filename and URL path"""
+    filename_lower = filename.lower()
+    url_path_lower = url_path.lower() if url_path else ''
+
+    # Combine filename and URL path for checking
+    # URL path often contains folder hints like /loras/, /vae/, /diffusion_models/
+    check_text = filename_lower + ' ' + url_path_lower
+
+    # Check for specific patterns (order matters - more specific first)
+    if any(x in check_text for x in ['/loras/', '/lora/', '_lora', '-lora', 'lora_']):
+        return 'lora', 'loras'
+    elif any(x in check_text for x in ['/vae/', '_vae', '-vae', 'vae_']):
+        return 'VAE', 'vae'
+    elif any(x in check_text for x in ['/controlnet/', 'controlnet', 'control_v', 'control-']):
+        return 'ControlNet', 'controlnet'
+    elif any(x in check_text for x in ['/clip/', '/text_encoder/', 'clip_', 'text_encoder']):
+        return 'CLIP', 'text_encoders'
+    elif any(x in check_text for x in ['/diffusion_model/', '/diffusion_models/', '/unet/', 'unet_', 'diffusion_model']):
+        return 'diffusion_model', 'diffusion_models'
+    elif any(x in check_text for x in ['/upscale/', 'upscale', 'esrgan', 'realesrgan', '4x_', '2x_']):
+        return 'Upscaler', 'upscale_models'
+    elif any(x in check_text for x in ['/embedding/', 'embedding_', '.pt']):
+        return 'Embedding', 'embeddings'
+    elif any(x in check_text for x in ['/ipadapter/', 'ipadapter', 'ip_adapter', 'ip-adapter']):
+        return 'IPAdapter', 'ipadapter'
+    elif any(x in check_text for x in ['/inpaint/', 'inpaint']):
+        return 'Inpaint', 'inpaint'
+    elif any(x in check_text for x in ['/checkpoint/', '/checkpoints/']):
+        return 'Checkpoint', 'checkpoints'
+    elif filename_lower.endswith('.safetensors') or filename_lower.endswith('.ckpt'):
+        # Default to checkpoint for .safetensors/.ckpt files
+        return 'Checkpoint', 'checkpoints'
+    else:
+        return 'Unknown', 'checkpoints'
+
+
+@routes.post("/workflow-models/analyze-url")
+async def analyze_url_endpoint(request):
+    """Analyze a URL to determine filename, model type, and suggested directory"""
+    import requests
+
+    try:
+        data = await request.json()
+        url = data.get('url', '').strip()
+
+        if not url:
+            return web.json_response({'error': 'Missing URL'}, status=400)
+
+        filename = None
+        size = None
+        source = 'Direct URL'
+
+        # Determine source and extract info
+        if 'huggingface.co' in url:
+            source = 'HuggingFace'
+            # Extract filename from HF URL
+            # Format: huggingface.co/repo/model/resolve/main/path/to/file.safetensors
+            hf_match = re.search(r'huggingface\.co/([^/]+/[^/]+)(?:/resolve/[^/]+)?/(.+?)(?:\?|$)', url)
+            if hf_match:
+                path = hf_match.group(2)
+                filename = path.split('/')[-1]
+                # Clean up query params from filename
+                if '?' in filename:
+                    filename = filename.split('?')[0]
+
+        elif 'civitai.com' in url:
+            source = 'CivitAI'
+            # CivitAI URLs are complex - try to get info from API or headers
+            # For now, we'll get filename from Content-Disposition header
+
+        # If we don't have a filename yet, try HEAD request
+        if not filename:
+            try:
+                headers = {}
+                if 'huggingface.co' in url:
+                    hf_token = get_huggingface_token()
+                    if hf_token:
+                        headers['Authorization'] = f'Bearer {hf_token}'
+                elif 'civitai.com' in url:
+                    civitai_key = get_civitai_api_key()
+                    if civitai_key:
+                        if '?' in url:
+                            url = f"{url}&token={civitai_key}"
+                        else:
+                            url = f"{url}?token={civitai_key}"
+
+                response = requests.head(url, headers=headers, allow_redirects=True, timeout=15)
+
+                # Try Content-Disposition header
+                cd = response.headers.get('Content-Disposition', '')
+                if 'filename=' in cd:
+                    # Parse filename from header
+                    match = re.search(r'filename[*]?=["\']?([^"\';\n]+)', cd)
+                    if match:
+                        filename = match.group(1).strip()
+                        # Handle UTF-8 encoded filenames
+                        if filename.startswith("UTF-8''"):
+                            filename = urllib.parse.unquote(filename[7:])
+
+                # Get size from Content-Length
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    size_bytes = int(content_length)
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= 1024:
+                        size = f"{size_mb/1024:.2f} GB"
+                    else:
+                        size = f"{size_mb:.1f} MB"
+
+            except Exception as e:
+                logging.warning(f"[WMD] Could not fetch URL headers: {e}")
+
+        # If still no filename, extract from URL path
+        if not filename:
+            parsed = urllib.parse.urlparse(url)
+            path = urllib.parse.unquote(parsed.path)
+            filename = path.split('/')[-1]
+            # Remove query params
+            if '?' in filename:
+                filename = filename.split('?')[0]
+
+        # If filename is empty or just an extension, generate a name
+        if not filename or filename.startswith('.'):
+            filename = f"model_{int(asyncio.get_event_loop().time())}.safetensors"
+
+        # Get URL path for type detection (includes folder structure hints)
+        parsed_url = urllib.parse.urlparse(url)
+        url_path = urllib.parse.unquote(parsed_url.path)
+
+        # Guess model type and directory from both filename AND URL path
+        model_type, suggested_dir = guess_model_type_from_filename(filename, url_path)
+
+        return web.json_response({
+            'success': True,
+            'url': url,
+            'filename': filename,
+            'model_type': model_type,
+            'suggested_directory': suggested_dir,
+            'size': size,
+            'source': source
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Analyze URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# ============================================================================
+# aria2 Integration with Resume Support
+# ============================================================================
+
+def check_aria2_available():
+    """Check if aria2c is installed and available"""
+    try:
+        aria2_path = shutil.which('aria2c')
+        if aria2_path:
+            result = subprocess.run([aria2_path, '--version'], capture_output=True, timeout=5)
+            return result.returncode == 0
+    except Exception:
+        pass
+    return False
+
+
+def _download_with_aria2(url, dest_path, download_id, headers=None):
+    """Download using aria2c with resume support"""
+    global active_download_count
+
+    try:
+        aria2_path = shutil.which('aria2c')
+        if not aria2_path:
+            return False, "aria2c not found"
+
+        dest_dir = os.path.dirname(dest_path)
+        dest_file = os.path.basename(dest_path)
+
+        cmd = [
+            aria2_path,
+            '--dir=' + dest_dir,
+            '--out=' + dest_file,
+            '--continue=true',           # Resume support
+            '--max-connection-per-server=4',
+            '--split=4',
+            '--min-split-size=1M',
+            '--file-allocation=none',
+            '--console-log-level=error',
+            '--summary-interval=1',
+            url
+        ]
+
+        if headers:
+            for key, value in headers.items():
+                cmd.append(f'--header={key}: {value}')
+
+        with download_lock:
+            download_progress[download_id]['status'] = 'downloading'
+            download_progress[download_id]['method'] = 'aria2'
+
+        # Run aria2c process
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+
+        # Monitor process
+        while True:
+            # Check for cancellation
+            if download_id in cancelled_downloads:
+                process.terminate()
+                try:
+                    process.wait(timeout=5)
+                except:
+                    process.kill()
+                return False, "Cancelled"
+
+            # Check if process completed
+            poll = process.poll()
+            if poll is not None:
+                break
+
+            # Try to read progress (aria2c outputs progress to stderr)
+            try:
+                import time
+                time.sleep(0.5)
+
+                # Check file size for progress
+                if os.path.exists(dest_path):
+                    current_size = os.path.getsize(dest_path)
+                    with download_lock:
+                        download_progress[download_id]['downloaded'] = current_size
+                        total = download_progress[download_id].get('total_size', 0)
+                        if total > 0:
+                            download_progress[download_id]['progress'] = int((current_size / total) * 100)
+            except:
+                pass
+
+        # Check result
+        if process.returncode == 0:
+            with download_lock:
+                download_progress[download_id]['status'] = 'completed'
+                download_progress[download_id]['progress'] = 100
+            return True, None
+        else:
+            stderr = process.stderr.read() if process.stderr else 'Unknown error'
+            return False, stderr
+
+    except Exception as e:
+        return False, str(e)
+    finally:
+        with download_queue_lock:
+            active_download_count = max(0, active_download_count - 1)
+
+
+def _download_native_with_resume(url, dest_path, download_id, headers=None):
+    """Download using requests with resume support (.partial file tracking)"""
+    import requests
+    global active_download_count
+
+    partial_path = dest_path + '.partial'
+    resume_byte = 0
+
+    # Check for existing partial download
+    if os.path.exists(partial_path):
+        resume_byte = os.path.getsize(partial_path)
+        logging.info(f"[WMD] Resuming download from byte {resume_byte}")
+
+    req_headers = headers.copy() if headers else {}
+    if resume_byte > 0:
+        req_headers['Range'] = f'bytes={resume_byte}-'
+
+    try:
+        response = requests.get(url, stream=True, timeout=30, allow_redirects=True, headers=req_headers)
+
+        # Check if server supports resume
+        if resume_byte > 0 and response.status_code != 206:
+            # Server doesn't support resume, start from beginning
+            resume_byte = 0
+            response = requests.get(url, stream=True, timeout=30, allow_redirects=True, headers=headers or {})
+
+        response.raise_for_status()
+
+        total_size = int(response.headers.get('content-length', 0))
+        if resume_byte > 0:
+            total_size += resume_byte  # Add already downloaded bytes
+
+        with download_lock:
+            download_progress[download_id]['total_size'] = total_size
+            download_progress[download_id]['status'] = 'downloading'
+            download_progress[download_id]['method'] = 'native_resume'
+
+        # Open file in append mode if resuming
+        mode = 'ab' if resume_byte > 0 else 'wb'
+        downloaded = resume_byte
+
+        with open(partial_path, mode) as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                # Check for cancellation
+                if download_id in cancelled_downloads:
+                    return False, "Cancelled"
+
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    with download_lock:
+                        download_progress[download_id]['downloaded'] = downloaded
+                        if total_size > 0:
+                            download_progress[download_id]['progress'] = int((downloaded / total_size) * 100)
+
+        # Rename partial to final
+        if os.path.exists(dest_path):
+            os.remove(dest_path)
+        os.rename(partial_path, dest_path)
+
+        with download_lock:
+            download_progress[download_id]['status'] = 'completed'
+            download_progress[download_id]['progress'] = 100
+
+        return True, None
+
+    except Exception as e:
+        # Keep partial file for resume
+        return False, str(e)
+    finally:
+        with download_queue_lock:
+            active_download_count = max(0, active_download_count - 1)
+
+
+# ============================================================================
+# Download Queue System
+# ============================================================================
+
+download_queue_worker_running = False
+
+
+def start_download_queue_worker():
+    """Start the background download queue worker if not already running"""
+    global download_queue_worker_running
+
+    if download_queue_worker_running:
+        return
+
+    download_queue_worker_running = True
+    worker_thread = threading.Thread(target=_download_queue_worker, daemon=True)
+    worker_thread.start()
+    logging.info("[WMD] Download queue worker started")
+
+
+def _download_queue_worker():
+    """Background thread that processes download queue"""
+    global download_queue_worker_running, active_download_count
+    import time
+
+    while download_queue_worker_running:
+        try:
+            with download_queue_lock:
+                # Check if we can start a new download
+                current_max = max_parallel_downloads
+                if current_max == 0:  # 0 means unlimited
+                    can_start = len(download_queue) > 0
+                else:
+                    can_start = active_download_count < current_max and len(download_queue) > 0
+
+                if can_start:
+                    next_download = download_queue.pop(0)
+                    active_download_count += 1
+
+                    # Start download in separate thread
+                    thread = threading.Thread(
+                        target=_process_queued_download,
+                        args=(next_download,),
+                        daemon=True
+                    )
+                    thread.start()
+        except Exception as e:
+            logging.error(f"[WMD] Queue worker error: {e}")
+
+        time.sleep(0.5)
+
+
+def _process_queued_download(download_info):
+    """Process a download from the queue"""
+    global active_download_count
+
+    download_id = download_info['download_id']
+    url = download_info['url']
+    dest_path = download_info['dest_path']
+    headers = download_info.get('headers', {})
+    filename = download_info.get('filename', '')
+
+    try:
+        with download_lock:
+            download_progress[download_id] = {
+                'status': 'starting',
+                'progress': 0,
+                'filename': filename,
+                'total_size': 0,
+                'downloaded': 0,
+                'queued': False
+            }
+
+        # Try aria2 first if available
+        aria2_available = check_aria2_available()
+
+        if aria2_available:
+            success, error = _download_with_aria2(url, dest_path, download_id, headers)
+        else:
+            success, error = _download_native_with_resume(url, dest_path, download_id, headers)
+
+        if not success and error != "Cancelled":
+            with download_lock:
+                download_progress[download_id]['status'] = 'error'
+                download_progress[download_id]['error'] = error
+
+        # Cache URL on success
+        if success:
+            source = 'civitai' if 'civitai.com' in url else ('huggingface' if 'huggingface.co' in url else 'direct')
+            hf_repo, hf_path = extract_huggingface_info(url)
+            _cache_download_url(filename, url, source, hf_repo=hf_repo, hf_path=hf_path)
+            logging.info(f"[WMD] Download completed: {filename}")
+
+    except Exception as e:
+        logging.error(f"[WMD] Queued download error: {e}")
+        with download_lock:
+            download_progress[download_id]['status'] = 'error'
+            download_progress[download_id]['error'] = str(e)
+    finally:
+        with download_queue_lock:
+            active_download_count = max(0, active_download_count - 1)
+        cancelled_downloads.discard(download_id)
+
+
+@routes.post("/workflow-models/queue-download")
+async def queue_download_endpoint(request):
+    """Add a download to the queue"""
+    try:
+        data = await request.json()
+
+        url = data.get('url')
+        filename = data.get('filename')
+        target_dir = data.get('directory')
+
+        if not all([url, filename, target_dir]):
+            return web.json_response({'error': 'Missing required fields'}, status=400)
+
+        # Generate download ID
+        download_id = f"queued_{filename}_{int(asyncio.get_event_loop().time() * 1000)}".replace('/', '_').replace('\\', '_')
+
+        # Prepare headers
+        headers = {}
+        if 'civitai.com' in url:
+            civitai_key = get_civitai_api_key()
+            if civitai_key:
+                if '?' in url:
+                    url = f"{url}&token={civitai_key}"
+                else:
+                    url = f"{url}?token={civitai_key}"
+        elif 'huggingface.co' in url:
+            hf_token = get_huggingface_token()
+            if hf_token:
+                headers['Authorization'] = f'Bearer {hf_token}'
+
+        # Normalize path
+        target_dir_normalized = target_dir.replace('/', os.sep).replace('\\', os.sep)
+        dest_path = os.path.join(folder_paths.models_dir, target_dir_normalized, filename)
+
+        # Create directory
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+
+        # Add to queue
+        download_info = {
+            'download_id': download_id,
+            'url': url,
+            'dest_path': dest_path,
+            'filename': filename,
+            'headers': headers
+        }
+
+        with download_queue_lock:
+            download_queue.append(download_info)
+
+        # Initialize progress tracking
+        with download_lock:
+            download_progress[download_id] = {
+                'status': 'queued',
+                'progress': 0,
+                'filename': filename,
+                'total_size': 0,
+                'downloaded': 0,
+                'queued': True
+            }
+
+        # Ensure queue worker is running
+        start_download_queue_worker()
+
+        return web.json_response({
+            'success': True,
+            'download_id': download_id,
+            'queued': True,
+            'message': f'Added {filename} to download queue'
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue download error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/queue-status")
+async def get_queue_status(request):
+    """Get download queue status"""
+    try:
+        with download_queue_lock:
+            queue_count = len(download_queue)
+            active = active_download_count
+
+        return web.json_response({
+            'queued': queue_count,
+            'active': active,
+            'max_parallel': max_parallel_downloads,
+            'aria2_available': check_aria2_available()
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Queue status error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/settings/parallel")
+async def set_parallel_downloads(request):
+    """Set max parallel downloads"""
+    global max_parallel_downloads
+
+    try:
+        data = await request.json()
+        value = data.get('max_parallel', 3)
+
+        # Validate value
+        if not isinstance(value, int) or value < 0 or value > 50:
+            return web.json_response({'error': 'Invalid value (must be 0-50)'}, status=400)
+
+        max_parallel_downloads = value
+
+        # Save to settings
+        settings = load_settings()
+        settings['max_parallel_downloads'] = value
+        save_settings(settings)
+
+        logging.info(f"[WMD] Max parallel downloads set to: {value}")
+
+        return web.json_response({
+            'success': True,
+            'max_parallel': value
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Set parallel downloads error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# Initialize max_parallel from settings on load
+def _init_parallel_setting():
+    global max_parallel_downloads
+    settings = load_settings()
+    max_parallel_downloads = settings.get('max_parallel_downloads', 3)
+
+_init_parallel_setting()
 
 
 logging.info("[Workflow-Models-Downloader] Extension loaded successfully")

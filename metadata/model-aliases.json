@@ -1,0 +1,114 @@
+{
+    "version": "1.0",
+    "description": "Model filename aliases for fuzzy matching. Canonical names map to variant aliases.",
+    "aliases": {
+        "sd_xl_base_1.0.safetensors": [
+            "sdxl_base.safetensors",
+            "sdxl-base-1.0.safetensors",
+            "sd-xl-base.safetensors",
+            "sdxl_1.0_base.safetensors"
+        ],
+        "sd_xl_refiner_1.0.safetensors": [
+            "sdxl_refiner.safetensors",
+            "sdxl-refiner-1.0.safetensors",
+            "sd-xl-refiner.safetensors"
+        ],
+        "flux1-dev.safetensors": [
+            "flux-dev.safetensors",
+            "FLUX.1-dev.safetensors",
+            "flux1_dev.safetensors",
+            "flux-1-dev.safetensors"
+        ],
+        "flux1-schnell.safetensors": [
+            "flux-schnell.safetensors",
+            "FLUX.1-schnell.safetensors",
+            "flux1_schnell.safetensors",
+            "flux-1-schnell.safetensors"
+        ],
+        "v1-5-pruned-emaonly.safetensors": [
+            "sd15.safetensors",
+            "sd-1-5.safetensors",
+            "stable-diffusion-1-5.safetensors",
+            "v1-5-pruned.safetensors",
+            "sd_v1.5.safetensors"
+        ],
+        "v2-1_768-ema-pruned.safetensors": [
+            "sd21.safetensors",
+            "sd-2-1.safetensors",
+            "stable-diffusion-2-1.safetensors",
+            "v2-1.safetensors"
+        ],
+        "sd3_medium.safetensors": [
+            "sd3-medium.safetensors",
+            "sd3.safetensors",
+            "stable-diffusion-3-medium.safetensors"
+        ],
+        "RealESRGAN_x4plus.pth": [
+            "realesrgan_x4plus.pth",
+            "real-esrgan-x4.pth",
+            "4x_realesrgan.pth"
+        ],
+        "clip_vision_g.safetensors": [
+            "clip-vision-g.safetensors",
+            "clip_g.safetensors",
+            "clipvision_g.safetensors"
+        ],
+        "t5xxl_fp16.safetensors": [
+            "t5-xxl-fp16.safetensors",
+            "t5xxl.safetensors",
+            "t5_xxl_fp16.safetensors"
+        ]
+    },
+    "patterns": [
+        {
+            "pattern": "(.+)[-_]?fp16\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "FP16 quantization variant"
+        },
+        {
+            "pattern": "(.+)[-_]?fp8\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "FP8 quantization variant"
+        },
+        {
+            "pattern": "(.+)[-_]?fp8[-_]?e4m3fn\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "FP8 E4M3FN quantization variant"
+        },
+        {
+            "pattern": "(.+)[-_]?bf16\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "BF16 quantization variant"
+        },
+        {
+            "pattern": "(.+)[-_]?q8_0\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "Q8_0 quantization variant"
+        },
+        {
+            "pattern": "(.+)[-_]?pruned\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "Pruned model variant"
+        },
+        {
+            "pattern": "(.+)[-_]?ema\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "EMA-only model variant"
+        },
+        {
+            "pattern": "(.+)[-_]?emaonly\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "EMA-only model variant"
+        },
+        {
+            "pattern": "(.+)[-_]?scaled\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "Scaled attention variant"
+        },
+        {
+            "pattern": "(.+)_v\\d+\\.safetensors$",
+            "base": "$1.safetensors",
+            "description": "Version suffix variant"
+        }
+    ]
+}
