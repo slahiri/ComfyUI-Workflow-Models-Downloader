@@ -1569,10 +1569,6 @@ class WorkflowModelsDownloader {
                         id: "wmd-tab-browser"
                     }, ["Local Browser"]),
                     $el("button.wmd-tab", {
-                        onclick: () => this.selectTab('settings'),
-                        id: "wmd-tab-settings"
-                    }, ["Settings"]),
-                    $el("button.wmd-tab", {
                         onclick: () => this.selectTab('help'),
                         id: "wmd-tab-help"
                     }, ["Help"])
@@ -1598,13 +1594,6 @@ class WorkflowModelsDownloader {
                         $el("div.wmd-loading", [
                             $el("div.wmd-spinner"),
                             $el("div", ["Loading installed models..."])
-                        ])
-                    ]),
-                    // Settings tab content
-                    $el("div.wmd-tab-content", { id: "wmd-content-settings" }, [
-                        $el("div.wmd-loading", [
-                            $el("div.wmd-spinner"),
-                            $el("div", ["Loading settings..."])
                         ])
                     ]),
                     // Help tab content
@@ -1647,7 +1636,6 @@ class WorkflowModelsDownloader {
         // Load tab-specific content
         if (tabName === 'downloads') this.loadDownloadsTab();
         if (tabName === 'browser') this.loadBrowserTab();
-        if (tabName === 'settings') this.loadSettingsTab();
         if (tabName === 'help') this.loadHelpTab();
 
         // Update footer based on tab
@@ -1929,7 +1917,7 @@ class WorkflowModelsDownloader {
                         <div class="wmd-url-input-row" id="wmd-url-row-${index}">
                             <input type="text" class="wmd-url-input"
                                    id="wmd-url-input-${index}"
-                                   placeholder="Or paste direct URL here..."
+                                   placeholder="Paste URL or CivitAI URN (urn:air:...)..."
                                    onkeypress="if(event.key==='Enter') window.wmdInstance.downloadFromManualUrl(${index})">
                             <button class="wmd-btn wmd-btn-primary wmd-btn-small"
                                     onclick="window.wmdInstance.downloadFromManualUrl(${index})">
@@ -2576,9 +2564,10 @@ class WorkflowModelsDownloader {
             return;
         }
 
-        // Validate URL format
-        if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            alert("Please enter a valid URL starting with http:// or https://");
+        // Validate URL format - accept http(s) URLs or CivitAI URN format
+        const isCivitAiUrn = url.startsWith('urn:') && url.includes(':civitai:');
+        if (!url.startsWith('http://') && !url.startsWith('https://') && !isCivitAiUrn) {
+            alert("Please enter a valid URL (http://, https://) or CivitAI URN (urn:air:...)");
             return;
         }
 
@@ -3029,7 +3018,7 @@ class WorkflowModelsDownloader {
                     <div class="wmd-downloads-section-title">Direct URL Download</div>
                     <div class="wmd-raw-download-input-row">
                         <input type="text" class="wmd-url-input" id="wmd-raw-url-input"
-                               placeholder="Paste model URL (HuggingFace, CivitAI, or direct link)..."
+                               placeholder="Paste URL (HuggingFace, CivitAI) or CivitAI URN (urn:air:...)..."
                                style="flex: 1;"
                                onkeypress="if(event.key==='Enter') window.wmdInstance.analyzeRawUrl()">
                         <button class="wmd-btn wmd-btn-info wmd-btn-small" onclick="window.wmdInstance.analyzeRawUrl()">
@@ -3111,6 +3100,14 @@ class WorkflowModelsDownloader {
                     </button>
                 </div>`;
         }
+    }
+
+    formatBytes(bytes) {
+        if (bytes === 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
     renderDownloadItem(download, status) {
@@ -3737,22 +3734,6 @@ class WorkflowModelsDownloader {
         }
     }
 
-    // Load Settings tab content
-    async loadSettingsTab() {
-        const content = document.getElementById("wmd-content-settings");
-        if (!content) return;
-
-        await this.loadSettings();
-
-        const settingsPanel = this.createSettingsPanel();
-        settingsPanel.style.margin = '0';
-        settingsPanel.style.border = 'none';
-        settingsPanel.style.borderRadius = '0';
-
-        content.innerHTML = '';
-        content.appendChild(settingsPanel);
-    }
-
     // Load Help tab content
     loadHelpTab() {
         const content = document.getElementById("wmd-content-help");
@@ -3765,11 +3746,6 @@ class WorkflowModelsDownloader {
 
         content.innerHTML = '';
         content.appendChild(helpPanel);
-    }
-
-    // Switch to settings tab
-    toggleSettings() {
-        this.selectTab('settings');
     }
 
     // Switch to help tab
@@ -3796,7 +3772,7 @@ class WorkflowModelsDownloader {
                         <li>Go to <a href="https://huggingface.co/settings/tokens" target="_blank" class="wmd-help-link">huggingface.co/settings/tokens</a></li>
                         <li>Click "New token" or "Create new token"</li>
                         <li>Give it a name (e.g., "ComfyUI") and select "Read" access</li>
-                        <li>Copy the token and paste it in Settings (gear icon above)</li>
+                        <li>Copy the token and paste it in <strong>ComfyUI Menu > Settings > Workflow Models Downloader</strong></li>
                     </ol>
                     <div class="wmd-help-note">
                         <strong>Note:</strong> HuggingFace tokens are required for gated models like Flux, SD3, etc.
@@ -3814,7 +3790,7 @@ class WorkflowModelsDownloader {
                         <li>Go to <a href="https://civitai.com/user/account" target="_blank" class="wmd-help-link">civitai.com/user/account</a></li>
                         <li>Scroll down to "API Keys" section</li>
                         <li>Click "Add API Key" and give it a name</li>
-                        <li>Copy the key and paste it in Settings (gear icon above)</li>
+                        <li>Copy the key and paste it in <strong>ComfyUI Menu > Settings > Workflow Models Downloader</strong></li>
                     </ol>
                     <div class="wmd-help-note">
                         <strong>Note:</strong> CivitAI API keys are required for downloading models from CivitAI,
@@ -3832,7 +3808,7 @@ class WorkflowModelsDownloader {
                     <ol>
                         <li>This is a <strong>ComfyUI Manager</strong> security setting, not an issue with this extension</li>
                         <li>Open ComfyUI Manager (click "Manager" button in ComfyUI)</li>
-                        <li>Go to <strong>Manager Settings</strong> (gear icon)</li>
+                        <li>Go to <strong>Manager Settings</strong></li>
                         <li>Find "Security Level" and change it from "Strong" to "Normal" or "Weak"</li>
                         <li>Restart ComfyUI and try installing again</li>
                     </ol>
@@ -3923,243 +3899,6 @@ class WorkflowModelsDownloader {
                 max_parallel_downloads: 3,
                 aria2_available: false
             };
-        }
-    }
-
-    createSettingsPanel() {
-        const panel = document.createElement('div');
-        panel.id = 'wmd-settings-panel';
-        panel.className = 'wmd-settings-panel';
-
-        const hfStatus = this.settings?.huggingface_token_set ? 'set' : 'not-set';
-        const hfStatusText = this.settings?.huggingface_token_set ? 'Configured' : 'Not Set';
-        const civitStatus = this.settings?.civitai_api_key_set ? 'set' : 'not-set';
-        const civitStatusText = this.settings?.civitai_api_key_set ? 'Configured' : 'Not Set';
-        const tavilyStatus = this.settings?.tavily_api_key_set ? 'set' : 'not-set';
-        const tavilyStatusText = this.settings?.tavily_api_key_set ? 'Configured' : 'Not Set';
-        const advancedSearchEnabled = this.settings?.enable_advanced_search || false;
-
-        panel.innerHTML = `
-            <div class="wmd-settings-title">
-                <span>\u2699</span> API Settings
-            </div>
-
-            <div class="wmd-settings-row">
-                <label class="wmd-settings-label">HuggingFace Token</label>
-                <input type="password"
-                       class="wmd-settings-input"
-                       id="wmd-hf-token"
-                       placeholder="${this.settings?.huggingface_token_set ? '••••••••••••' : 'Enter your HuggingFace token'}"
-                       value="">
-                <span class="wmd-settings-status ${hfStatus}">${hfStatusText}</span>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
-                Get your token at <a href="https://huggingface.co/settings/tokens" target="_blank" class="wmd-settings-link">huggingface.co/settings/tokens</a>
-                - Required for gated models (Flux, SD3, etc.)
-            </div>
-
-            <div class="wmd-settings-row">
-                <label class="wmd-settings-label">CivitAI API Key</label>
-                <input type="password"
-                       class="wmd-settings-input"
-                       id="wmd-civit-key"
-                       placeholder="${this.settings?.civitai_api_key_set ? '••••••••••••' : 'Enter your CivitAI API key'}"
-                       value="">
-                <span class="wmd-settings-status ${civitStatus}">${civitStatusText}</span>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
-                Get your API key at <a href="https://civitai.com/user/account" target="_blank" class="wmd-settings-link">civitai.com/user/account</a>
-                - Required for downloading from CivitAI
-            </div>
-
-            <div class="wmd-settings-row">
-                <label class="wmd-settings-label">Tavily API Key</label>
-                <input type="password"
-                       class="wmd-settings-input"
-                       id="wmd-tavily-key"
-                       placeholder="${this.settings?.tavily_api_key_set ? '••••••••••••' : 'Enter your Tavily API key'}"
-                       value="">
-                <span class="wmd-settings-status ${tavilyStatus}">${tavilyStatusText}</span>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
-                Get your API key at <a href="https://tavily.com" target="_blank" class="wmd-settings-link">tavily.com</a>
-                - Required for Advanced Search feature
-            </div>
-
-            <div class="wmd-settings-row" style="margin-top: 10px;">
-                <label class="wmd-settings-label">Advanced Search</label>
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="checkbox"
-                           id="wmd-advanced-search-enabled"
-                           ${advancedSearchEnabled ? 'checked' : ''}
-                           ${!this.settings?.tavily_api_key_set ? 'disabled' : ''}
-                           style="width: 18px; height: 18px; cursor: pointer;">
-                    <span style="color: ${this.settings?.tavily_api_key_set ? '#ddd' : '#666'};">
-                        Enable Advanced Search (uses Tavily AI)
-                    </span>
-                </label>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px;">
-                When enabled, replaces "Search URL" with "Advanced Search" using AI-powered web search
-            </div>
-
-            <div class="wmd-settings-title" style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #444;">
-                <span>📥</span> Download Settings
-            </div>
-
-            <div class="wmd-settings-row">
-                <label class="wmd-settings-label">Max Parallel Downloads</label>
-                <select class="wmd-dir-select" id="wmd-max-parallel" style="min-width: 120px;">
-                    <option value="0" ${this.settings?.max_parallel_downloads === 0 ? 'selected' : ''}>Unlimited</option>
-                    ${[1,2,3,4,5,10,20,30,40,50].map(n =>
-                        `<option value="${n}" ${this.settings?.max_parallel_downloads === n ? 'selected' : ''}>${n}</option>`
-                    ).join('')}
-                </select>
-                <span class="wmd-settings-status set" style="min-width: auto; padding: 4px 10px;">
-                    Current: ${this.settings?.max_parallel_downloads === 0 ? 'Unlimited' : this.settings?.max_parallel_downloads || 3}
-                </span>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
-                Limit the number of simultaneous downloads. Set to 0 for unlimited.
-            </div>
-
-            <div class="wmd-settings-row">
-                <label class="wmd-settings-label">Download Method</label>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <span class="wmd-settings-status ${this.settings?.aria2_available ? 'set' : 'not-set'}" style="min-width: auto; padding: 4px 10px;">
-                        ${this.settings?.aria2_available ? 'aria2 Available' : 'aria2 Not Found'}
-                    </span>
-                    <span style="color: #888; font-size: 12px;">
-                        ${this.settings?.aria2_available
-                            ? '4x faster downloads with resume support'
-                            : 'Using native downloader with resume support'}
-                    </span>
-                </div>
-            </div>
-            <div class="wmd-settings-hint" style="margin-left: 152px; margin-bottom: 14px;">
-                ${this.settings?.aria2_available
-                    ? 'aria2c detected! Downloads will use multi-connection and resume automatically.'
-                    : 'Install <a href="https://aria2.github.io/" target="_blank" class="wmd-settings-link">aria2</a> for faster downloads with automatic resume.'}
-            </div>
-
-            <div class="wmd-settings-actions">
-                <button class="wmd-btn wmd-btn-secondary" onclick="window.wmdInstance.clearSettings()">
-                    Clear All
-                </button>
-                <button class="wmd-btn wmd-btn-primary" onclick="window.wmdInstance.saveSettings()">
-                    Save Settings
-                </button>
-            </div>
-        `;
-
-        return panel;
-    }
-
-    async saveSettings() {
-        const hfToken = document.getElementById('wmd-hf-token')?.value || '';
-        const civitKey = document.getElementById('wmd-civit-key')?.value || '';
-        const tavilyKey = document.getElementById('wmd-tavily-key')?.value || '';
-        const advancedSearchEnabled = document.getElementById('wmd-advanced-search-enabled')?.checked || false;
-        const maxParallel = parseInt(document.getElementById('wmd-max-parallel')?.value) || 3;
-
-        const data = {};
-
-        // Only include if user entered a new value
-        if (hfToken && !hfToken.startsWith('•')) {
-            data.huggingface_token = hfToken;
-        }
-        if (civitKey && !civitKey.startsWith('•')) {
-            data.civitai_api_key = civitKey;
-        }
-        if (tavilyKey && !tavilyKey.startsWith('•')) {
-            data.tavily_api_key = tavilyKey;
-        }
-
-        // Always save the checkbox state
-        data.enable_advanced_search = advancedSearchEnabled;
-
-        // Check for changes
-        const hasNewKeys = Object.keys(data).filter(k => k !== 'enable_advanced_search').length > 0;
-        const checkboxChanged = advancedSearchEnabled !== this.settings?.enable_advanced_search;
-        const parallelChanged = maxParallel !== this.settings?.max_parallel_downloads;
-
-        // Save parallel downloads setting separately
-        if (parallelChanged) {
-            try {
-                await api.fetchApi("/workflow-models/settings/parallel", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ max_parallel: maxParallel })
-                });
-                this.settings.max_parallel_downloads = maxParallel;
-                this.showNotification('Parallel downloads setting saved', 'success');
-            } catch (error) {
-                console.error("[WMD] Error saving parallel setting:", error);
-                this.showNotification('Error saving parallel setting', 'error');
-            }
-        }
-
-        // If no API key changes, just show success for parallel setting change
-        if (!hasNewKeys && !checkboxChanged) {
-            if (parallelChanged) {
-                // Already showed notification above
-                this.loadSettingsTab(); // Refresh to show updated current value
-            }
-            return;
-        }
-
-        try {
-            const response = await api.fetchApi("/workflow-models/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(data)
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                // Show success notification
-                this.showNotification('Settings saved successfully', 'success');
-
-                // Reload settings tab to show updated values
-                await this.loadSettingsTab();
-            } else {
-                this.showNotification('Failed to save settings: ' + (result.error || 'Unknown error'), 'error');
-            }
-        } catch (error) {
-            console.error("[WMD] Save settings error:", error);
-            this.showNotification('Error saving settings: ' + error.message, 'error');
-        }
-    }
-
-    async clearSettings() {
-        if (!confirm('Are you sure you want to clear all API keys?')) {
-            return;
-        }
-
-        try {
-            const response = await api.fetchApi("/workflow-models/settings", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    huggingface_token: '',
-                    civitai_api_key: '',
-                    tavily_api_key: '',
-                    enable_advanced_search: false
-                })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                this.showNotification('Settings cleared', 'success');
-
-                // Reload settings tab to show updated values
-                await this.loadSettingsTab();
-            }
-        } catch (error) {
-            console.error("[WMD] Clear settings error:", error);
-            this.showNotification('Error clearing settings: ' + error.message, 'error');
         }
     }
 

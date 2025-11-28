@@ -52,7 +52,7 @@ import shutil
 
 
 def load_settings():
-    """Load settings from settings.json"""
+    """Load settings from settings.json or ComfyUI's native settings"""
     global _settings_cache
     if _settings_cache is not None:
         return _settings_cache
@@ -64,6 +64,7 @@ def load_settings():
         'enable_advanced_search': False
     }
 
+    # First try extension's own settings file
     try:
         if os.path.exists(SETTINGS_FILE):
             with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
@@ -73,6 +74,24 @@ def load_settings():
                 return _settings_cache
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Error loading settings: {e}")
+
+    # Fall back to ComfyUI's native settings
+    try:
+        comfy_settings_path = os.path.join(folder_paths.base_path, 'user', 'default', 'comfy.settings.json')
+        if os.path.exists(comfy_settings_path):
+            with open(comfy_settings_path, 'r', encoding='utf-8') as f:
+                comfy_settings = json.load(f)
+                # Map ComfyUI setting keys to our internal keys
+                _settings_cache = {
+                    'huggingface_token': comfy_settings.get('WorkflowModelsDownloader.HuggingFaceToken', ''),
+                    'civitai_api_key': comfy_settings.get('WorkflowModelsDownloader.CivitAIApiKey', ''),
+                    'tavily_api_key': comfy_settings.get('WorkflowModelsDownloader.TavilyApiKey', ''),
+                    'enable_advanced_search': comfy_settings.get('WorkflowModelsDownloader.EnableAdvancedSearch', False)
+                }
+                logging.info(f"[WMD] Loaded settings from ComfyUI native settings")
+                return _settings_cache
+    except Exception as e:
+        logging.error(f"[Workflow-Models-Downloader] Error loading ComfyUI settings: {e}")
 
     _settings_cache = default_settings
     return _settings_cache
@@ -99,9 +118,53 @@ def get_huggingface_token():
 
 
 def get_civitai_api_key():
-    """Get CivitAI API key from settings"""
+    """Get CivitAI API key from settings (force reload to get latest)"""
+    global _settings_cache
+    _settings_cache = None  # Force reload to get latest settings
     settings = load_settings()
-    return settings.get('civitai_api_key', '')
+    key = settings.get('civitai_api_key', '')
+    if key:
+        logging.debug(f"[WMD] CivitAI API key found (length: {len(key)})")
+    else:
+        logging.warning("[WMD] CivitAI API key not configured")
+    return key
+
+
+def parse_civitai_urn(urn_string):
+    """
+    Parse CivitAI URN format: urn:air:other:unknown:civitai:MODEL_ID@VERSION_ID
+    Returns (model_id, version_id) tuple or (None, None) if not a valid URN
+    """
+    if not urn_string or not urn_string.startswith('urn:'):
+        return None, None
+
+    # Pattern: urn:air:other:unknown:civitai:MODEL_ID@VERSION_ID
+    # Also support: urn:air:MODEL_TYPE:BASE_MODEL:civitai:MODEL_ID@VERSION_ID
+    urn_pattern = r'^urn:air:[^:]+:[^:]+:civitai:(\d+)@(\d+)$'
+    match = re.match(urn_pattern, urn_string)
+    if match:
+        return match.group(1), match.group(2)
+
+    return None, None
+
+
+def civitai_urn_to_download_url(urn_string):
+    """
+    Convert CivitAI URN to download URL
+    Returns download URL or None if not a valid URN
+    """
+    model_id, version_id = parse_civitai_urn(urn_string)
+    if version_id:
+        return f"https://civitai.com/api/download/models/{version_id}"
+    return None
+
+
+def is_civitai_urn(value):
+    """Check if a value is a CivitAI URN"""
+    if not value or not isinstance(value, str):
+        return False
+    model_id, version_id = parse_civitai_urn(value)
+    return model_id is not None and version_id is not None
 
 
 def get_tavily_api_key():
@@ -1950,7 +2013,7 @@ async def lookup_by_hash(request):
 
 @routes.post("/workflow-models/download-url")
 async def download_from_url(request):
-    """Download a model from a direct URL"""
+    """Download a model from a direct URL or CivitAI URN"""
     try:
         data = await request.json()
 
@@ -1960,6 +2023,15 @@ async def download_from_url(request):
 
         if not all([url, filename, target_dir]):
             return web.json_response({'error': 'Missing required fields (url, filename, directory)'}, status=400)
+
+        # Check if URL is actually a CivitAI URN and convert it
+        if is_civitai_urn(url):
+            civitai_url = civitai_urn_to_download_url(url)
+            if civitai_url:
+                logging.info(f"[Workflow-Models-Downloader] Converted CivitAI URN to download URL: {url} -> {civitai_url}")
+                url = civitai_url
+            else:
+                return web.json_response({'error': 'Invalid CivitAI URN format'}, status=400)
 
         # Generate download ID
         download_id = f"direct_{filename}".replace('/', '_').replace('\\', '_')
@@ -2211,12 +2283,16 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
         headers = {}
         if 'civitai.com' in url:
             civitai_key = get_civitai_api_key()
+            logging.info(f"[WMD] CivitAI download - key configured: {bool(civitai_key)}")
             if civitai_key:
                 # CivitAI uses token as query parameter
                 if '?' in url:
                     url = f"{url}&token={civitai_key}"
                 else:
                     url = f"{url}?token={civitai_key}"
+                logging.info(f"[WMD] CivitAI URL with token: {url[:80]}...")
+            else:
+                logging.warning("[WMD] CivitAI download attempted without API key!")
         elif 'huggingface.co' in url:
             hf_token = get_huggingface_token()
             if hf_token:
@@ -2295,7 +2371,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 @routes.get("/workflow-models/version")
 async def get_version(request):
     """Get extension version"""
-    return web.Response(text="1.7.0")
+    return web.Response(text="1.8.1")
 
 
 @routes.get("/workflow-models/settings")
@@ -2804,9 +2880,39 @@ async def analyze_url_endpoint(request):
         filename = None
         size = None
         source = 'Direct URL'
+        original_urn = None
+
+        # Check if it's a CivitAI URN and convert to download URL
+        if is_civitai_urn(url):
+            original_urn = url
+            model_id, version_id = parse_civitai_urn(url)
+            url = civitai_urn_to_download_url(url)
+            source = 'CivitAI URN'
+            logging.info(f"[WMD] Converted URN to URL: {original_urn} -> {url}")
+
+            # Try to get model info from CivitAI API using version ID
+            try:
+                api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
+                api_response = requests.get(api_url, timeout=10)
+                if api_response.status_code == 200:
+                    version_data = api_response.json()
+                    files = version_data.get('files', [])
+                    if files:
+                        # Get the primary file (usually the first/largest)
+                        primary_file = files[0]
+                        filename = primary_file.get('name', '')
+                        file_size = primary_file.get('sizeKB', 0)
+                        if file_size:
+                            size_mb = file_size / 1024
+                            if size_mb >= 1024:
+                                size = f"{size_mb/1024:.2f} GB"
+                            else:
+                                size = f"{size_mb:.1f} MB"
+            except Exception as e:
+                logging.warning(f"[WMD] Could not fetch CivitAI version info: {e}")
 
         # Determine source and extract info
-        if 'huggingface.co' in url:
+        elif 'huggingface.co' in url:
             source = 'HuggingFace'
             # Extract filename from HF URL
             # Format: huggingface.co/repo/model/resolve/main/path/to/file.safetensors
@@ -3197,6 +3303,15 @@ async def queue_download_endpoint(request):
 
         if not all([url, filename, target_dir]):
             return web.json_response({'error': 'Missing required fields'}, status=400)
+
+        # Check if URL is actually a CivitAI URN and convert it
+        if is_civitai_urn(url):
+            civitai_url = civitai_urn_to_download_url(url)
+            if civitai_url:
+                logging.info(f"[WMD] Converted CivitAI URN to download URL: {url} -> {civitai_url}")
+                url = civitai_url
+            else:
+                return web.json_response({'error': 'Invalid CivitAI URN format'}, status=400)
 
         # Generate download ID
         download_id = f"queued_{filename}_{int(asyncio.get_event_loop().time() * 1000)}".replace('/', '_').replace('\\', '_')
