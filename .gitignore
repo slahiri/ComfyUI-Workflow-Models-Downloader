@@ -18,3 +18,5 @@ settings.json
 
 # Search cache file
 search_cache.json
+usage_cache.json
+node.zip

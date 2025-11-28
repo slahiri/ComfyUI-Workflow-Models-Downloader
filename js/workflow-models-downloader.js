@@ -334,6 +334,85 @@ const styles = `
     white-space: nowrap;
 }
 
+.wmd-unused-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    background-color: #8b5cf6;
+    color: white;
+    margin-left: 6px;
+    white-space: nowrap;
+}
+
+.wmd-cache-controls {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #444;
+}
+
+.wmd-cache-controls-title {
+    font-size: 12px;
+    color: #888;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.wmd-cache-info {
+    font-size: 11px;
+    color: #666;
+    margin-bottom: 8px;
+}
+
+.wmd-cache-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.wmd-cache-buttons button {
+    padding: 6px 10px;
+    font-size: 11px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-align: left;
+}
+
+.wmd-cache-buttons button.scan {
+    background: #2563eb;
+    color: white;
+}
+
+.wmd-cache-buttons button.scan:hover {
+    background: #1d4ed8;
+}
+
+.wmd-cache-buttons button.clear {
+    background: #333;
+    color: #aaa;
+}
+
+.wmd-cache-buttons button.clear:hover {
+    background: #dc2626;
+    color: white;
+}
+
+.wmd-scan-input {
+    width: 100%;
+    padding: 6px 8px;
+    font-size: 11px;
+    background: #333;
+    border: 1px solid #444;
+    border-radius: 4px;
+    color: #ddd;
+    margin-bottom: 6px;
+}
+
+.wmd-scan-input::placeholder {
+    color: #666;
+}
+
 .wmd-dir-select {
     background-color: #333;
     color: #ddd;
@@ -425,6 +504,83 @@ const styles = `
     font-size: 10px;
     font-weight: bold;
     margin-left: 6px;
+}
+
+.wmd-alternatives-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: bold;
+    margin-left: 8px;
+    background-color: #2196F3;
+    color: #fff;
+    cursor: pointer;
+}
+
+.wmd-alternatives-badge:hover {
+    background-color: #1976D2;
+}
+
+.wmd-alternatives-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 20px;
+    min-width: 400px;
+    max-width: 600px;
+    z-index: 10001;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+
+.wmd-alternatives-popup h3 {
+    margin: 0 0 16px 0;
+    color: #4CAF50;
+}
+
+.wmd-alternatives-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.wmd-alternative-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background: #1a1a1a;
+    border-radius: 6px;
+    margin-bottom: 8px;
+}
+
+.wmd-alternative-info {
+    flex: 1;
+}
+
+.wmd-alternative-name {
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 4px;
+}
+
+.wmd-alternative-meta {
+    font-size: 12px;
+    color: #888;
+}
+
+.wmd-format-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: bold;
+    background-color: #4a3a1a;
+    color: #ff9800;
+    margin-right: 8px;
 }
 
 .wmd-filename-cell {
@@ -1263,6 +1419,10 @@ class WorkflowModelsDownloader {
         this.browserFilter = ""; // Search filter for browser
         this.browserType = ""; // Type filter for browser
         this.browserSort = "name"; // Sort option for browser
+        this.browserShowUnused = false; // Show only unused models
+        this.unusedModels = new Set(); // Set of unused model filenames
+        this.trackedModelCount = 0; // Number of models in usage cache
+        this.availableDirectories = []; // Fetched from backend
         this.downloadQueue = []; // Queued downloads
         this.downloadHistory = []; // Download history
         this.activeDownloadCount = 0; // Track active downloads for badge
@@ -1278,10 +1438,30 @@ class WorkflowModelsDownloader {
 
         this.createModal();
         document.body.appendChild(this.modal);
-        await this.scanWorkflow();
+
+        // Load directories and scan workflow in parallel
+        await Promise.all([
+            this.loadAvailableDirectories(),
+            this.scanWorkflow()
+        ]);
 
         // Check for any active downloads and restore progress tracking
         await this.checkActiveDownloads();
+    }
+
+    async loadAvailableDirectories() {
+        try {
+            const response = await api.fetchApi("/workflow-models/directories");
+            const result = await response.json();
+            if (result.success && result.directories) {
+                this.availableDirectories = result.directories.map(d => d.name);
+                console.log("[WMD] Loaded", this.availableDirectories.length, "available directories");
+            }
+        } catch (error) {
+            console.error("[WMD] Error loading directories:", error);
+            // Fall back to hardcoded list
+            this.availableDirectories = [...MODEL_DIRECTORIES];
+        }
     }
 
     close() {
@@ -1522,6 +1702,9 @@ class WorkflowModelsDownloader {
                 this.models = result.models;
                 console.log("[WMD] Found", result.models.length, "models:", result.models.map(m => m.filename));
                 this.renderModels(result.models, result.summary);
+
+                // Track model usage for unused detection
+                this.trackModelUsage(result.models);
             } else {
                 this.showError(result.error || "Failed to scan workflow");
             }
@@ -1532,8 +1715,12 @@ class WorkflowModelsDownloader {
     }
 
     buildDirectoryOptions(currentDir) {
+        // Use fetched directories or fall back to hardcoded list
+        let dirs = this.availableDirectories.length > 0
+            ? [...this.availableDirectories]
+            : [...MODEL_DIRECTORIES];
+
         // Ensure current directory is in the list
-        let dirs = [...MODEL_DIRECTORIES];
         if (currentDir && !dirs.includes(currentDir)) {
             dirs.unshift(currentDir);
         }
@@ -1643,7 +1830,19 @@ class WorkflowModelsDownloader {
         // Build table
         const tableRows = models.map((model, index) => {
             const statusClass = model.exists ? "wmd-status-exists" : "wmd-status-missing";
-            const statusText = model.exists ? `EXISTS (${model.local_size})` : "MISSING";
+            let statusText = model.exists ? `EXISTS (${model.local_size})` : "MISSING";
+
+            // Show alternatives badge if missing but alternatives exist
+            let alternativesBadge = '';
+            if (!model.exists && model.alternatives && model.alternatives.length > 0) {
+                alternativesBadge = `
+                    <span class="wmd-alternatives-badge"
+                          onclick="window.wmdInstance.showAlternatives(${index})"
+                          title="Click to see ${model.alternatives.length} alternative format(s) available">
+                        ${model.alternatives.length} alt
+                    </span>
+                `;
+            }
 
             // Directory dropdown
             const dirOptions = this.buildDirectoryOptions(model.directory);
@@ -1763,7 +1962,7 @@ class WorkflowModelsDownloader {
                     <td class="wmd-filename-cell"><strong>${model.filename}</strong></td>
                     <td><span class="wmd-type-badge">${model.type}</span></td>
                     <td>${dirDropdown}</td>
-                    <td class="${statusClass}" id="wmd-status-cell-${index}">${statusText}</td>
+                    <td class="${statusClass}" id="wmd-status-cell-${index}">${statusText} ${alternativesBadge}</td>
                     <td>${hfLink}</td>
                     <td>${actionCell}</td>
                 </tr>
@@ -1823,6 +2022,84 @@ class WorkflowModelsDownloader {
                 await new Promise(resolve => setTimeout(resolve, 500));
             }
         }
+    }
+
+    showAlternatives(index) {
+        const model = this.models[index];
+        if (!model || !model.alternatives || model.alternatives.length === 0) {
+            this.showNotification('No alternatives found', 'info');
+            return;
+        }
+
+        // Remove existing popup if any
+        const existingPopup = document.querySelector('.wmd-alternatives-popup');
+        if (existingPopup) existingPopup.remove();
+
+        // Create overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'wmd-modal-overlay';
+        overlay.style.zIndex = '10000';
+        overlay.onclick = (e) => {
+            if (e.target === overlay) overlay.remove();
+        };
+
+        // Create popup
+        const popup = document.createElement('div');
+        popup.className = 'wmd-alternatives-popup';
+        popup.innerHTML = `
+            <h3>Alternative Formats Available</h3>
+            <p style="color: #888; margin-bottom: 16px;">
+                Looking for: <strong>${model.filename}</strong>
+            </p>
+            <div class="wmd-alternatives-list">
+                ${model.alternatives.map((alt, i) => `
+                    <div class="wmd-alternative-item">
+                        <div class="wmd-alternative-info">
+                            <div class="wmd-alternative-name">${alt.filename}</div>
+                            <div class="wmd-alternative-meta">
+                                <span class="wmd-format-badge">${alt.format}</span>
+                                ${alt.size || ''} | ${alt.directory}
+                            </div>
+                        </div>
+                        <button class="wmd-btn wmd-btn-info wmd-btn-small"
+                                onclick="window.wmdInstance.useAlternative(${index}, ${i}); this.closest('.wmd-modal-overlay').remove();">
+                            Use This
+                        </button>
+                    </div>
+                `).join('')}
+            </div>
+            <div style="margin-top: 16px; text-align: right;">
+                <button class="wmd-btn wmd-btn-secondary" onclick="this.closest('.wmd-modal-overlay').remove();">
+                    Close
+                </button>
+            </div>
+        `;
+
+        overlay.appendChild(popup);
+        document.body.appendChild(overlay);
+    }
+
+    useAlternative(modelIndex, altIndex) {
+        const model = this.models[modelIndex];
+        const alt = model?.alternatives?.[altIndex];
+
+        if (!model || !alt) {
+            this.showNotification('Alternative not found', 'error');
+            return;
+        }
+
+        // Copy the alternative filename to clipboard with a helpful message
+        navigator.clipboard.writeText(alt.filename).then(() => {
+            this.showNotification(
+                `Alternative "${alt.filename}" copied to clipboard. Update your workflow node to use this file.`,
+                'success'
+            );
+        }).catch(() => {
+            this.showNotification(
+                `Use "${alt.filename}" from ${alt.directory}/ in your workflow`,
+                'info'
+            );
+        });
     }
 
     async fuzzyMatch(index) {
@@ -2901,7 +3178,9 @@ class WorkflowModelsDownloader {
             if (result.success) {
                 this.rawDownloadInfo = result;
 
-                const dirOptions = MODEL_DIRECTORIES.map(dir =>
+                // Use fetched directories or fall back to hardcoded list
+                const dirs = this.availableDirectories.length > 0 ? this.availableDirectories : MODEL_DIRECTORIES;
+                const dirOptions = dirs.map(dir =>
                     `<option value="${dir}" ${dir === result.suggested_directory ? 'selected' : ''}>models/${dir}/</option>`
                 ).join('');
 
@@ -3034,8 +3313,12 @@ class WorkflowModelsDownloader {
         `;
 
         try {
-            const response = await api.fetchApi("/workflow-models/installed");
-            const data = await response.json();
+            // Load both installed models and unused models info in parallel
+            const [modelsResponse, _] = await Promise.all([
+                api.fetchApi("/workflow-models/installed"),
+                this.loadUnusedModels()
+            ]);
+            const data = await modelsResponse.json();
             this.installedModels = data.models || [];
 
             this.renderBrowserTab();
@@ -3087,19 +3370,49 @@ class WorkflowModelsDownloader {
             </div>
         `).join('');
 
+        const unusedCount = this.unusedModels.size;
+
         content.innerHTML = `
             <div class="wmd-browser-layout">
                 <!-- Folder Tree Sidebar -->
                 <div class="wmd-browser-sidebar">
                     <div class="wmd-browser-sidebar-title">Folders</div>
                     <div class="wmd-folder-tree">
-                        <div class="wmd-folder-item ${this.browserType === '' ? 'active' : ''}"
-                             onclick="window.wmdInstance.onBrowserTypeChange('')">
+                        <div class="wmd-folder-item ${!this.browserShowUnused && this.browserType === '' ? 'active' : ''}"
+                             onclick="window.wmdInstance.browserShowUnused = false; window.wmdInstance.onBrowserTypeChange('')">
                             <span class="wmd-folder-item-icon">📂</span>
                             <span class="wmd-folder-item-name">All Models</span>
                             <span class="wmd-folder-item-count">${this.installedModels.length}</span>
                         </div>
+                        <div class="wmd-folder-item ${this.browserShowUnused ? 'active' : ''}"
+                             onclick="window.wmdInstance.toggleUnusedFilter()"
+                             title="Models not used in any workflow scans (scan multiple workflows to build usage history)">
+                            <span class="wmd-folder-item-icon">🗑️</span>
+                            <span class="wmd-folder-item-name">Unused</span>
+                            <span class="wmd-folder-item-count">${unusedCount}</span>
+                        </div>
                         ${folderTreeHtml}
+                    </div>
+
+                    <!-- Cache Controls -->
+                    <div class="wmd-cache-controls">
+                        <div class="wmd-cache-controls-title">Usage Tracking</div>
+                        <div class="wmd-cache-info" id="wmd-cache-info">
+                            Tracked: ${this.trackedModelCount || 0} models
+                        </div>
+                        <input type="text" class="wmd-scan-input" id="wmd-scan-path"
+                               placeholder="Workflow folder (leave empty for default)"
+                               title="Path to scan for workflow JSON files">
+                        <div class="wmd-cache-buttons">
+                            <button class="scan" onclick="window.wmdInstance.scanAllWorkflows()"
+                                    title="Scan all JSON files in folder to find used models">
+                                Scan All Workflows
+                            </button>
+                            <button class="clear" onclick="window.wmdInstance.clearUsageCache()"
+                                    title="Clear usage tracking cache">
+                                Clear Cache
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -3138,12 +3451,15 @@ class WorkflowModelsDownloader {
 
     renderBrowserItem(model) {
         const escapedPath = model.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const isUnused = this.unusedModels.has(model.filename);
+        const unusedBadge = isUnused ? '<span class="wmd-unused-badge" title="Not used in any scanned workflow">unused</span>' : '';
         return `
             <div class="wmd-browser-item">
                 <div class="wmd-browser-item-info">
                     <div class="wmd-browser-item-name">${model.filename}</div>
                     <div class="wmd-browser-item-meta">
                         <span class="wmd-type-badge">${model.type}</span>
+                        ${unusedBadge}
                         <span>${model.size_human}</span>
                     </div>
                 </div>
@@ -3158,6 +3474,21 @@ class WorkflowModelsDownloader {
 
     getFilteredBrowserModels() {
         let models = [...this.installedModels];
+
+        // Debug logging
+        if (this.browserType) {
+            const matchingTypes = models.filter(m => m.type === this.browserType);
+            console.log(`[WMD] Filtering by type '${this.browserType}': ${matchingTypes.length} matches out of ${models.length} total`);
+            if (matchingTypes.length === 0 && models.length > 0) {
+                const availableTypes = [...new Set(models.map(m => m.type))];
+                console.log(`[WMD] Available types:`, availableTypes);
+            }
+        }
+
+        // Filter by unused
+        if (this.browserShowUnused) {
+            models = models.filter(m => this.unusedModels.has(m.filename));
+        }
 
         // Filter by search
         if (this.browserFilter) {
@@ -3190,12 +3521,119 @@ class WorkflowModelsDownloader {
 
     onBrowserTypeChange(value) {
         this.browserType = value;
+        // Clear unused filter when selecting a specific type (unless it's from All Models click which handles it)
+        if (value) {
+            this.browserShowUnused = false;
+        }
         this.renderBrowserTab();
     }
 
     onBrowserSort(value) {
         this.browserSort = value;
         this.renderBrowserTab();
+    }
+
+    toggleUnusedFilter() {
+        this.browserShowUnused = !this.browserShowUnused;
+        this.browserType = ""; // Clear type filter when toggling unused
+        this.renderBrowserTab();
+    }
+
+    async trackModelUsage(models) {
+        try {
+            await api.fetchApi("/workflow-models/track-usage", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    models: models.filter(m => m.exists).map(m => ({
+                        filename: m.filename,
+                        directory: m.directory
+                    }))
+                })
+            });
+            console.log("[WMD] Tracked usage for", models.filter(m => m.exists).length, "models");
+        } catch (error) {
+            console.error("[WMD] Error tracking usage:", error);
+        }
+    }
+
+    async loadUnusedModels() {
+        try {
+            const response = await api.fetchApi("/workflow-models/unused");
+            const result = await response.json();
+
+            if (result.success) {
+                this.unusedModels = new Set(result.unused_models.map(m => m.filename));
+                this.trackedModelCount = result.tracked_count || 0;
+                console.log("[WMD] Loaded", this.unusedModels.size, "unused models,", this.trackedModelCount, "tracked");
+            }
+        } catch (error) {
+            console.error("[WMD] Error loading unused models:", error);
+        }
+    }
+
+    async scanAllWorkflows() {
+        const pathInput = document.getElementById('wmd-scan-path');
+        const directory = pathInput ? pathInput.value.trim() : '';
+
+        try {
+            this.showNotification('Scanning workflows...', 'info');
+
+            const response = await api.fetchApi("/workflow-models/scan-all-workflows", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ directory })
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showNotification(
+                    `Scanned ${result.workflows_scanned} workflows, found ${result.models_found} models`,
+                    'success'
+                );
+                // Reload the browser tab to update unused counts
+                await this.loadBrowserTab();
+            } else {
+                this.showNotification(result.error || 'Failed to scan workflows', 'error');
+                if (result.default_path) {
+                    // Show the default path in the input for reference
+                    if (pathInput) pathInput.placeholder = result.default_path;
+                }
+            }
+        } catch (error) {
+            console.error("[WMD] Error scanning workflows:", error);
+            this.showNotification('Error scanning workflows: ' + error.message, 'error');
+        }
+    }
+
+    async clearUsageCache() {
+        if (!confirm('Clear all usage tracking data? This cannot be undone.')) {
+            return;
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/clear-cache", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({})
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                this.showNotification('Usage cache cleared', 'success');
+                this.unusedModels = new Set();
+                this.trackedModelCount = 0;
+                // Reload to update the view
+                await this.loadBrowserTab();
+            } else {
+                this.showNotification(result.error || 'Failed to clear cache', 'error');
+            }
+        } catch (error) {
+            console.error("[WMD] Error clearing cache:", error);
+            this.showNotification('Error clearing cache: ' + error.message, 'error');
+        }
     }
 
     async copyModelPath(path) {

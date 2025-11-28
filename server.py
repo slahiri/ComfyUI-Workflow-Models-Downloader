@@ -916,6 +916,105 @@ EQUIVALENT_DIRECTORIES = {
     'diffusion_models': ['unet', 'diffusion_models'],
 }
 
+# Model format alternatives - used to find compatible alternatives
+MODEL_FORMAT_PATTERNS = [
+    # (pattern_to_match, alternative_suffixes_to_try)
+    (r'(.+?)[-_]?fp32\.safetensors$', ['fp16', 'bf16', 'fp8', 'fp8_e4m3fn', 'gguf']),
+    (r'(.+?)[-_]?fp16\.safetensors$', ['fp32', 'bf16', 'fp8', 'fp8_e4m3fn', 'gguf']),
+    (r'(.+?)[-_]?bf16\.safetensors$', ['fp16', 'fp32', 'fp8', 'fp8_e4m3fn', 'gguf']),
+    (r'(.+?)[-_]?fp8[-_]?e4m3fn\.safetensors$', ['fp16', 'bf16', 'fp8', 'fp32']),
+    (r'(.+?)[-_]?fp8\.safetensors$', ['fp16', 'bf16', 'fp8_e4m3fn', 'fp32']),
+    (r'(.+?)\.gguf$', ['safetensors', 'fp16.safetensors', 'bf16.safetensors']),
+    (r'(.+?)[-_]?Q\d+.*\.gguf$', ['safetensors', 'fp16.safetensors', 'gguf']),
+    (r'(.+?)\.safetensors$', ['fp16.safetensors', 'bf16.safetensors', 'fp8.safetensors', 'gguf']),
+]
+
+
+def find_model_alternatives(filename, target_dir):
+    """Find alternative versions of a model (different quantizations/formats)"""
+    alternatives = []
+    filename_lower = filename.lower()
+    base_name = None
+
+    # Try to extract base name from filename
+    for pattern, alt_suffixes in MODEL_FORMAT_PATTERNS:
+        match = re.match(pattern, filename_lower)
+        if match:
+            base_name = match.group(1)
+            break
+
+    if not base_name:
+        # Try simple extension removal
+        base_name = os.path.splitext(filename_lower)[0]
+        # Remove common suffixes
+        for suffix in ['_fp16', '_fp32', '_bf16', '_fp8', '-fp16', '-fp32', '-bf16', '-fp8']:
+            if base_name.endswith(suffix):
+                base_name = base_name[:-len(suffix)]
+                break
+
+    # Get list of directories to check
+    dirs_to_check = [target_dir]
+    if target_dir in EQUIVALENT_DIRECTORIES:
+        dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
+
+    for check_dir in dirs_to_check:
+        try:
+            available_files = folder_paths.get_filename_list(check_dir)
+
+            for available_file in available_files:
+                available_lower = available_file.lower()
+                available_base = os.path.splitext(os.path.basename(available_lower))[0]
+
+                # Remove common suffixes for comparison
+                for suffix in ['_fp16', '_fp32', '_bf16', '_fp8', '-fp16', '-fp32', '-bf16', '-fp8', '_fp8_e4m3fn']:
+                    if available_base.endswith(suffix):
+                        available_base = available_base[:-len(suffix)]
+                        break
+
+                # Check if this could be an alternative
+                if available_file.lower() != filename_lower:
+                    # Check if base names are similar
+                    if base_name in available_base or available_base in base_name:
+                        # Get full path and size
+                        full_path = folder_paths.get_full_path(check_dir, available_file)
+                        size_str = None
+                        if full_path and os.path.exists(full_path):
+                            try:
+                                size_bytes = os.path.getsize(full_path)
+                                size_mb = size_bytes / (1024 * 1024)
+                                if size_mb >= 1024:
+                                    size_str = f"{size_mb/1024:.2f} GB"
+                                else:
+                                    size_str = f"{size_mb:.1f} MB"
+                            except:
+                                pass
+
+                        # Determine format type
+                        format_type = 'unknown'
+                        if 'gguf' in available_lower:
+                            format_type = 'GGUF'
+                        elif 'fp16' in available_lower:
+                            format_type = 'FP16'
+                        elif 'bf16' in available_lower:
+                            format_type = 'BF16'
+                        elif 'fp8' in available_lower:
+                            format_type = 'FP8'
+                        elif 'fp32' in available_lower:
+                            format_type = 'FP32'
+                        elif available_lower.endswith('.safetensors'):
+                            format_type = 'SafeTensors'
+
+                        alternatives.append({
+                            'filename': available_file,
+                            'directory': check_dir,
+                            'format': format_type,
+                            'size': size_str
+                        })
+        except Exception as e:
+            logging.debug(f"[WMD] Error finding alternatives in {check_dir}: {e}")
+
+    return alternatives[:5]  # Return top 5 alternatives
+
 
 def check_model_exists(target_dir, filename):
     """Check if model file exists using ComfyUI's folder_paths system.
@@ -1157,6 +1256,11 @@ def scan_workflow_for_models(workflow_json):
         else:
             source = 'Unknown'
 
+        # Find alternatives if model doesn't exist
+        alternatives = []
+        if not exists:
+            alternatives = find_model_alternatives(model, target_dir)
+
         models_data.append({
             'filename': model,
             'type': model_type,
@@ -1170,7 +1274,8 @@ def scan_workflow_for_models(workflow_json):
             'hf_path': hf_path or '',
             'node_type': node_type,
             'url_source': url_source or ('workflow' if url else None),
-            'search_metadata': cached_metadata
+            'search_metadata': cached_metadata,
+            'alternatives': alternatives
         })
 
     return models_data
@@ -1210,6 +1315,386 @@ async def scan_workflow(request):
         })
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Scan error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/directories")
+async def get_available_directories(request):
+    """Get available model directories including extra_model_paths"""
+    try:
+        # Start with standard model types
+        all_types = set([
+            'checkpoints', 'clip', 'clip_vision', 'controlnet', 'diffusion_models',
+            'embeddings', 'gligen', 'hypernetworks', 'ipadapter', 'loras',
+            'style_models', 'text_encoders', 'unet', 'upscale_models', 'vae',
+            'photomaker', 'instantid', 'pulid', 'sams', 'animatediff_models'
+        ])
+
+        # Add any custom folder types from folder_paths (includes extra_model_paths.yaml)
+        if hasattr(folder_paths, 'folder_names_and_paths'):
+            for folder_type in folder_paths.folder_names_and_paths.keys():
+                all_types.add(folder_type)
+
+        available = []
+        for folder_type in all_types:
+            try:
+                paths = folder_paths.get_folder_paths(folder_type)
+                if paths:
+                    available.append({
+                        'name': folder_type,
+                        'paths': paths,
+                        'has_extra_paths': len(paths) > 1
+                    })
+            except:
+                # Folder type not registered, skip
+                pass
+
+        # Sort alphabetically
+        available.sort(key=lambda x: x['name'])
+
+        return web.json_response({
+            'success': True,
+            'directories': available
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Get directories error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/debug-paths")
+async def debug_model_paths(request):
+    """Debug endpoint to show all model paths ComfyUI knows about"""
+    try:
+        paths_info = {}
+        folder_types = ['checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'text_encoders',
+                        'diffusion_models', 'unet', 'embeddings', 'upscale_models', 'clip_vision']
+
+        for folder_type in folder_types:
+            try:
+                paths = folder_paths.get_folder_paths(folder_type)
+                file_count = len(folder_paths.get_filename_list(folder_type))
+                paths_info[folder_type] = {
+                    'paths': paths,
+                    'file_count': file_count
+                }
+            except Exception as e:
+                paths_info[folder_type] = {
+                    'paths': [],
+                    'file_count': 0,
+                    'error': str(e)
+                }
+
+        return web.json_response({
+            'success': True,
+            'models_dir': folder_paths.models_dir,
+            'folder_paths': paths_info
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Debug paths error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# Track which models have been used in workflows (for unused detection)
+used_models_tracking = {}  # filename -> { last_used: timestamp, workflows: [list of workflow names] }
+
+# Cache file path
+USAGE_CACHE_FILE = os.path.join(os.path.dirname(__file__), "usage_cache.json")
+
+
+def load_usage_cache():
+    """Load usage tracking from persistent cache"""
+    global used_models_tracking
+    try:
+        if os.path.exists(USAGE_CACHE_FILE):
+            with open(USAGE_CACHE_FILE, 'r', encoding='utf-8') as f:
+                used_models_tracking = json.load(f)
+            logging.info(f"[WMD] Loaded usage cache with {len(used_models_tracking)} models")
+    except Exception as e:
+        logging.error(f"[WMD] Error loading usage cache: {e}")
+        used_models_tracking = {}
+
+
+def save_usage_cache():
+    """Save usage tracking to persistent cache"""
+    global used_models_tracking
+    try:
+        with open(USAGE_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(used_models_tracking, f, indent=2)
+        logging.info(f"[WMD] Saved usage cache with {len(used_models_tracking)} models")
+    except Exception as e:
+        logging.error(f"[WMD] Error saving usage cache: {e}")
+
+
+# Load cache on module import
+load_usage_cache()
+
+
+def extract_models_from_workflow(workflow_data):
+    """Extract model filenames from a workflow JSON"""
+    models = set()
+
+    def extract_from_node(node):
+        if isinstance(node, dict):
+            widgets = node.get('widgets_values', [])
+            if widgets:
+                for val in widgets:
+                    if isinstance(val, str) and (val.endswith('.safetensors') or val.endswith('.ckpt') or
+                                                   val.endswith('.pt') or val.endswith('.pth') or
+                                                   val.endswith('.bin') or val.endswith('.gguf')):
+                        models.add(val)
+
+    # Handle both graph format and API format
+    nodes = workflow_data.get('nodes', [])
+    if isinstance(nodes, list):
+        for node in nodes:
+            extract_from_node(node)
+
+    # Also check 'workflow' key if present (embedded in PNG metadata)
+    if 'workflow' in workflow_data:
+        nested = workflow_data['workflow']
+        if isinstance(nested, dict) and 'nodes' in nested:
+            for node in nested.get('nodes', []):
+                extract_from_node(node)
+
+    return models
+
+
+@routes.post("/workflow-models/track-usage")
+async def track_model_usage(request):
+    """Track which models are used in the current workflow"""
+    global used_models_tracking
+    import time
+
+    try:
+        data = await request.json()
+        models = data.get('models', [])
+        workflow_name = data.get('workflow_name', 'current')
+
+        timestamp = time.time()
+        for model in models:
+            filename = model.get('filename', '')
+            if filename:
+                if filename not in used_models_tracking:
+                    used_models_tracking[filename] = {'last_used': timestamp, 'workflows': []}
+                else:
+                    used_models_tracking[filename]['last_used'] = timestamp
+
+                # Add workflow to list if not already there
+                workflows = used_models_tracking[filename].get('workflows', [])
+                if workflow_name and workflow_name not in workflows:
+                    workflows.append(workflow_name)
+                    used_models_tracking[filename]['workflows'] = workflows[-10:]  # Keep last 10
+
+        # Save to persistent cache
+        save_usage_cache()
+
+        return web.json_response({'success': True, 'tracked': len(models)})
+    except Exception as e:
+        logging.error(f"[WMD] Track usage error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/unused")
+async def get_unused_models(request):
+    """Get list of installed models that haven't been used recently"""
+    global used_models_tracking
+
+    try:
+        # Get all installed models
+        all_models = []
+        folder_types = ['checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'text_encoders',
+                        'diffusion_models', 'unet', 'embeddings', 'upscale_models']
+
+        for folder_type in folder_types:
+            try:
+                files = folder_paths.get_filename_list(folder_type)
+                for filename in files:
+                    full_path = folder_paths.get_full_path(folder_type, filename)
+                    size_str = None
+                    modified_time = None
+
+                    if full_path and os.path.exists(full_path):
+                        try:
+                            stat = os.stat(full_path)
+                            size_bytes = stat.st_size
+                            size_mb = size_bytes / (1024 * 1024)
+                            if size_mb >= 1024:
+                                size_str = f"{size_mb/1024:.2f} GB"
+                            else:
+                                size_str = f"{size_mb:.1f} MB"
+                            modified_time = stat.st_mtime
+                        except:
+                            pass
+
+                    # Check if model was used (handle both old and new format)
+                    usage_info = used_models_tracking.get(filename)
+                    if isinstance(usage_info, dict):
+                        is_used = True
+                        last_used = usage_info.get('last_used')
+                        workflows = usage_info.get('workflows', [])
+                    elif usage_info is not None:
+                        # Old format (just timestamp)
+                        is_used = True
+                        last_used = usage_info
+                        workflows = []
+                    else:
+                        is_used = False
+                        last_used = None
+                        workflows = []
+
+                    all_models.append({
+                        'filename': filename,
+                        'type': folder_type,
+                        'size': size_str,
+                        'modified': modified_time,
+                        'last_used': last_used,
+                        'is_used': is_used,
+                        'workflows': workflows
+                    })
+            except:
+                pass
+
+        # Sort by unused first, then by size (largest first)
+        unused_models = [m for m in all_models if not m['is_used']]
+        unused_models.sort(key=lambda x: -(x.get('modified') or 0))
+
+        return web.json_response({
+            'success': True,
+            'total_models': len(all_models),
+            'unused_count': len(unused_models),
+            'unused_models': unused_models,
+            'tracked_count': len(used_models_tracking)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Unused models error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/scan-all-workflows")
+async def scan_all_workflows(request):
+    """Scan all workflow files in a directory to build usage cache"""
+    global used_models_tracking
+    import time
+    import glob
+
+    try:
+        data = await request.json()
+        directory = data.get('directory', '')
+
+        # Default to ComfyUI user directory
+        if not directory:
+            directory = os.path.join(folder_paths.base_path, 'user', 'default', 'workflows')
+            if not os.path.exists(directory):
+                # Try output directory
+                directory = os.path.join(folder_paths.base_path, 'output')
+
+        if not os.path.exists(directory):
+            return web.json_response({
+                'error': f'Directory not found: {directory}',
+                'default_path': directory
+            }, status=400)
+
+        # Find all JSON files
+        json_files = glob.glob(os.path.join(directory, '**', '*.json'), recursive=True)
+        logging.info(f"[WMD] Scanning {len(json_files)} workflow files in {directory}")
+
+        scanned = 0
+        errors = 0
+        models_found = set()
+        timestamp = time.time()
+
+        for filepath in json_files:
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    workflow_data = json.load(f)
+
+                # Extract models from workflow
+                workflow_models = extract_models_from_workflow(workflow_data)
+                workflow_name = os.path.basename(filepath)
+
+                for model in workflow_models:
+                    models_found.add(model)
+                    if model not in used_models_tracking:
+                        used_models_tracking[model] = {'last_used': timestamp, 'workflows': []}
+
+                    workflows = used_models_tracking[model].get('workflows', [])
+                    if workflow_name not in workflows:
+                        workflows.append(workflow_name)
+                        used_models_tracking[model]['workflows'] = workflows[-10:]  # Keep last 10
+                    used_models_tracking[model]['last_used'] = timestamp
+
+                scanned += 1
+            except Exception as e:
+                logging.debug(f"[WMD] Error scanning {filepath}: {e}")
+                errors += 1
+
+        # Save to persistent cache
+        save_usage_cache()
+
+        return web.json_response({
+            'success': True,
+            'directory': directory,
+            'workflows_scanned': scanned,
+            'workflows_errored': errors,
+            'models_found': len(models_found),
+            'total_tracked': len(used_models_tracking)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Scan all workflows error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/clear-cache")
+async def clear_usage_cache(request):
+    """Clear the usage tracking cache"""
+    global used_models_tracking
+
+    try:
+        used_models_tracking = {}
+
+        # Delete cache file
+        if os.path.exists(USAGE_CACHE_FILE):
+            os.remove(USAGE_CACHE_FILE)
+            logging.info("[WMD] Usage cache cleared and file deleted")
+
+        return web.json_response({
+            'success': True,
+            'message': 'Usage cache cleared'
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Clear cache error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/cache-info")
+async def get_cache_info(request):
+    """Get information about the usage cache"""
+    global used_models_tracking
+
+    try:
+        cache_size = 0
+        if os.path.exists(USAGE_CACHE_FILE):
+            cache_size = os.path.getsize(USAGE_CACHE_FILE)
+
+        # Get default workflow directories
+        default_dirs = []
+        user_workflows = os.path.join(folder_paths.base_path, 'user', 'default', 'workflows')
+        if os.path.exists(user_workflows):
+            default_dirs.append(user_workflows)
+
+        output_dir = os.path.join(folder_paths.base_path, 'output')
+        if os.path.exists(output_dir):
+            default_dirs.append(output_dir)
+
+        return web.json_response({
+            'success': True,
+            'tracked_models': len(used_models_tracking),
+            'cache_file': USAGE_CACHE_FILE,
+            'cache_size_bytes': cache_size,
+            'default_directories': default_dirs
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Cache info error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
 
@@ -1893,15 +2378,21 @@ async def get_installed_models(request):
     try:
         models = []
 
-        # Model types to scan
-        model_types = [
+        # Get all registered folder types dynamically (includes extra_model_paths.yaml)
+        # Start with common types, then add any others from folder_paths
+        model_types = set([
             'checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'clip_vision',
             'text_encoders', 'diffusion_models', 'unet', 'embeddings',
             'upscale_models', 'hypernetworks', 'gligen', 'style_models',
             'ipadapter', 'instantid', 'photomaker', 'pulid', 'sams',
             'depthanything', 'groundingdino', 'insightface', 'animatediff_models',
             'vae_approx'
-        ]
+        ])
+
+        # Add any custom folder types from folder_paths (includes extra_model_paths.yaml)
+        if hasattr(folder_paths, 'folder_names_and_paths'):
+            for folder_type in folder_paths.folder_names_and_paths.keys():
+                model_types.add(folder_type)
 
         for folder_type in model_types:
             try:
