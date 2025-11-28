@@ -3000,6 +3000,9 @@ class WorkflowModelsDownloader {
 
         try {
             const response = await api.fetchApi("/workflow-models/progress");
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
             const allProgress = await response.json();
 
             // Separate active and completed downloads
@@ -3098,7 +3101,15 @@ class WorkflowModelsDownloader {
             }
         } catch (error) {
             console.error("[WMD] Error loading downloads:", error);
-            content.innerHTML = `<div class="wmd-browser-empty">Error loading downloads</div>`;
+            content.innerHTML = `
+                <div class="wmd-browser-empty">
+                    Error loading downloads: ${error.message}
+                    <br><br>
+                    <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
+                            onclick="window.wmdInstance.loadDownloadsTab()">
+                        Retry
+                    </button>
+                </div>`;
         }
     }
 
