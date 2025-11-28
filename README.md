@@ -25,7 +25,11 @@ Manage all your downloads in one place. Features Direct URL Download - paste any
 ![Downloads Tab](images/downloads-tab.png)
 
 ### Local Browser Tab
-Browse all your installed models organized by folder. Folder tree sidebar shows model counts per category. Search, sort, and manage your models with copy path, view details, and delete options.
+Browse all your installed models organized by folder. Features include:
+- **Folder tree sidebar** with model counts per category
+- **Unused models filter** - identify models not used in any workflow
+- **Usage Tracking** - scan all workflows to build usage history
+- **Search, sort, and manage** with copy path, view details, and delete options
 
 ![Local Browser Tab](images/local-browser-tab.png)
 
@@ -57,6 +61,10 @@ Built-in FAQ and troubleshooting guide covering API key setup, common errors, an
 - **Tabbed UI** - Clean organization with 5 tabs: Workflow Models, Downloads, Local Browser, Settings, Help
 - **Direct URL Download** - Paste any URL, auto-detect model type, choose directory, and download
 - **Local Browser** - Browse all installed models with folder tree sidebar, search, and sort
+- **Unused Models Tracking** - Identify models not used in any workflow with persistent cache
+- **Scan All Workflows** - Batch scan workflow files to build usage history
+- **Alternative Formats** - Auto-detect GGUF/fp16/quantized variants when model is missing
+- **Dynamic Folder Types** - Supports custom folders from extra_model_paths.yaml
 - **Fuzzy Matching** - Find similar models with 70% confidence threshold
 - **Model Aliases** - Pattern-based matching for fp16/fp8/quantized variants
 - **aria2 Integration** - 4x faster downloads with automatic resume support
