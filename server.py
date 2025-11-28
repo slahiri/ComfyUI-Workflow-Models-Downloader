@@ -1322,17 +1322,30 @@ async def scan_workflow(request):
 async def get_available_directories(request):
     """Get available model directories including extra_model_paths"""
     try:
-        # Start with standard model types
+        # Standard model folder types (curated list)
         all_types = set([
             'checkpoints', 'clip', 'clip_vision', 'controlnet', 'diffusion_models',
             'embeddings', 'gligen', 'hypernetworks', 'ipadapter', 'loras',
             'style_models', 'text_encoders', 'unet', 'upscale_models', 'vae',
-            'photomaker', 'instantid', 'pulid', 'sams', 'animatediff_models'
+            'photomaker', 'instantid', 'pulid', 'sams', 'animatediff_models',
+            'ultralytics', 'mmdets', 'onnx', 'reactor', 'facerestore_models',
+            'facedetection', 'liveportrait', 'inpaint', 'xlabs', 'LLM',
+            'llm_gguf', 'CogVideo', 'blip'
         ])
 
-        # Add any custom folder types from folder_paths (includes extra_model_paths.yaml)
+        # Folders to exclude (not model folders)
+        EXCLUDED_FOLDERS = {
+            'custom_nodes', 'configs', 'fonts', 'kjnodes_fonts', 'web', 'js',
+            'user', 'input', 'output', 'temp', 'models', 'pycache'
+        }
+
+        # Add custom folder types, excluding non-model folders
         if hasattr(folder_paths, 'folder_names_and_paths'):
             for folder_type in folder_paths.folder_names_and_paths.keys():
+                if folder_type.lower() in EXCLUDED_FOLDERS:
+                    continue
+                if any(x in folder_type.lower() for x in ['pycache', '_cache', 'config', 'font']):
+                    continue
                 all_types.add(folder_type)
 
         available = []
@@ -2378,20 +2391,37 @@ async def get_installed_models(request):
     try:
         models = []
 
-        # Get all registered folder types dynamically (includes extra_model_paths.yaml)
-        # Start with common types, then add any others from folder_paths
+        # Valid model file extensions
+        MODEL_EXTENSIONS = {'.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.gguf', '.sft'}
+
+        # Known model folder types (curated list)
         model_types = set([
             'checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'clip_vision',
             'text_encoders', 'diffusion_models', 'unet', 'embeddings',
             'upscale_models', 'hypernetworks', 'gligen', 'style_models',
             'ipadapter', 'instantid', 'photomaker', 'pulid', 'sams',
             'depthanything', 'groundingdino', 'insightface', 'animatediff_models',
-            'vae_approx'
+            'vae_approx', 'ultralytics', 'mmdets', 'onnx', 'reactor', 'facerestore_models',
+            'facedetection', 'liveportrait', 'layerstyle', 'rembg', 'segment_anything',
+            'inpaint', 'prompt_expansion', 'xlabs', 'LLM', 'Joy_caption', 'Florence2',
+            'llm_gguf', 'CogVideo', 'TIPO', 'blip', 'nsfw_detector', 'mediapipe'
         ])
 
-        # Add any custom folder types from folder_paths (includes extra_model_paths.yaml)
+        # Folders to exclude (not model folders)
+        EXCLUDED_FOLDERS = {
+            'custom_nodes', 'configs', 'fonts', 'kjnodes_fonts', 'web', 'js',
+            'user', 'input', 'output', 'temp', 'models', 'pycache'
+        }
+
+        # Add custom folder types from folder_paths, but only if they look like model folders
         if hasattr(folder_paths, 'folder_names_and_paths'):
             for folder_type in folder_paths.folder_names_and_paths.keys():
+                # Skip excluded folders
+                if folder_type.lower() in EXCLUDED_FOLDERS:
+                    continue
+                # Skip if folder name contains certain patterns
+                if any(x in folder_type.lower() for x in ['pycache', '_cache', 'config', 'font']):
+                    continue
                 model_types.add(folder_type)
 
         for folder_type in model_types:
@@ -2400,6 +2430,11 @@ async def get_installed_models(request):
 
                 for filename in files:
                     try:
+                        # Only include files with model extensions
+                        ext = os.path.splitext(filename)[1].lower()
+                        if ext not in MODEL_EXTENSIONS:
+                            continue
+
                         full_path = folder_paths.get_full_path(folder_type, filename)
                         if full_path and os.path.exists(full_path):
                             stat = os.stat(full_path)
