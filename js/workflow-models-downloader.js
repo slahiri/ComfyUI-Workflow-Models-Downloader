@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.7.0";
+const VERSION = "1.7.1";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -641,6 +641,115 @@ const styles = `
 .wmd-info-tooltip-value a:hover {
     text-decoration: underline;
 }
+
+.wmd-help-btn {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 4px 8px;
+    margin-right: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.wmd-help-btn:hover {
+    color: #fff;
+    background-color: #2196F3;
+}
+
+.wmd-help-panel {
+    background-color: #252525;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.wmd-help-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #fff;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.wmd-help-section {
+    margin-bottom: 20px;
+}
+
+.wmd-help-section:last-child {
+    margin-bottom: 0;
+}
+
+.wmd-help-section-title {
+    font-size: 14px;
+    font-weight: bold;
+    color: #4CAF50;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.wmd-help-section-content {
+    font-size: 13px;
+    color: #ccc;
+    line-height: 1.6;
+    padding-left: 20px;
+}
+
+.wmd-help-section-content ol {
+    margin: 8px 0;
+    padding-left: 20px;
+}
+
+.wmd-help-section-content li {
+    margin-bottom: 6px;
+}
+
+.wmd-help-section-content code {
+    background-color: #333;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #ff9800;
+}
+
+.wmd-help-link {
+    color: #5599ff;
+    text-decoration: none;
+}
+
+.wmd-help-link:hover {
+    text-decoration: underline;
+}
+
+.wmd-help-note {
+    background-color: #1a3a4a;
+    border-left: 3px solid #2196F3;
+    padding: 10px 14px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: #aaa;
+}
+
+.wmd-help-warning {
+    background-color: #4a3a1a;
+    border-left: 3px solid #ff9800;
+    padding: 10px 14px;
+    margin: 10px 0;
+    font-size: 12px;
+    color: #ffcc80;
+}
 `;
 
 // Add styles to document
@@ -656,6 +765,7 @@ class WorkflowModelsDownloader {
         this.downloads = {};
         this.progressInterval = null;
         this.showSettings = false;
+        this.showHelp = false;
         this.settings = null;
         this.currentFilter = "all"; // all, existing, ready, unknown
     }
@@ -759,6 +869,10 @@ class WorkflowModelsDownloader {
                             $el("option", { value: "ready" }, ["Ready For Download"]),
                             $el("option", { value: "unknown" }, ["Missing URLs / Unknown"])
                         ]),
+                        $el("button.wmd-help-btn", {
+                            onclick: () => this.toggleHelp(),
+                            title: "Help & FAQ"
+                        }, ["?"]),
                         $el("button.wmd-settings-btn", {
                             onclick: () => this.toggleSettings(),
                             title: "Settings"
@@ -1875,6 +1989,12 @@ class WorkflowModelsDownloader {
         const body = document.getElementById("wmd-body");
 
         if (this.showSettings) {
+            // Close help panel if open
+            if (this.showHelp) {
+                this.showHelp = false;
+                const helpPanel = document.getElementById("wmd-help-panel");
+                if (helpPanel) helpPanel.remove();
+            }
             // Load current settings
             await this.loadSettings();
             // Insert settings panel at the top
@@ -1885,6 +2005,153 @@ class WorkflowModelsDownloader {
             const panel = document.getElementById("wmd-settings-panel");
             if (panel) panel.remove();
         }
+    }
+
+    toggleHelp() {
+        this.showHelp = !this.showHelp;
+        const body = document.getElementById("wmd-body");
+
+        if (this.showHelp) {
+            // Close settings panel if open
+            if (this.showSettings) {
+                this.showSettings = false;
+                const settingsPanel = document.getElementById("wmd-settings-panel");
+                if (settingsPanel) settingsPanel.remove();
+            }
+            // Insert help panel at the top
+            const helpPanel = this.createHelpPanel();
+            body.insertBefore(helpPanel, body.firstChild);
+        } else {
+            // Remove help panel
+            const panel = document.getElementById("wmd-help-panel");
+            if (panel) panel.remove();
+        }
+    }
+
+    createHelpPanel() {
+        const panel = document.createElement('div');
+        panel.id = 'wmd-help-panel';
+        panel.className = 'wmd-help-panel';
+
+        panel.innerHTML = `
+            <div class="wmd-help-title">
+                <span style="color: #2196F3;">?</span> Help & FAQ
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>🔑</span> How to Get a HuggingFace Token
+                </div>
+                <div class="wmd-help-section-content">
+                    <ol>
+                        <li>Go to <a href="https://huggingface.co/settings/tokens" target="_blank" class="wmd-help-link">huggingface.co/settings/tokens</a></li>
+                        <li>Click "New token" or "Create new token"</li>
+                        <li>Give it a name (e.g., "ComfyUI") and select "Read" access</li>
+                        <li>Copy the token and paste it in Settings (gear icon above)</li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Note:</strong> HuggingFace tokens are required for gated models like Flux, SD3, etc.
+                        You must also accept the model's license on its HuggingFace page before downloading.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>🎨</span> How to Get a CivitAI API Key
+                </div>
+                <div class="wmd-help-section-content">
+                    <ol>
+                        <li>Go to <a href="https://civitai.com/user/account" target="_blank" class="wmd-help-link">civitai.com/user/account</a></li>
+                        <li>Scroll down to "API Keys" section</li>
+                        <li>Click "Add API Key" and give it a name</li>
+                        <li>Copy the key and paste it in Settings (gear icon above)</li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Note:</strong> CivitAI API keys are required for downloading models from CivitAI,
+                        including early access models.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>⚠️</span> "Security Error" When Installing from Registry
+                </div>
+                <div class="wmd-help-section-content">
+                    If you see <strong>"only custom nodes from default channel"</strong> error when installing:
+                    <ol>
+                        <li>This is a <strong>ComfyUI Manager</strong> security setting, not an issue with this extension</li>
+                        <li>Open ComfyUI Manager (click "Manager" button in ComfyUI)</li>
+                        <li>Go to <strong>Manager Settings</strong> (gear icon)</li>
+                        <li>Find "Security Level" and change it from "Strong" to "Normal" or "Weak"</li>
+                        <li>Restart ComfyUI and try installing again</li>
+                    </ol>
+                    <div class="wmd-help-warning">
+                        <strong>Alternative:</strong> You can also install manually by cloning the repository:<br>
+                        <code>git clone https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader</code><br>
+                        into your <code>ComfyUI/custom_nodes/</code> folder.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>📁</span> Custom Model Directories (extra_model_paths.yaml)
+                </div>
+                <div class="wmd-help-section-content">
+                    If you store models in custom directories outside the default <code>models/</code> folder:
+                    <ol>
+                        <li>This extension now supports <code>extra_model_paths.yaml</code></li>
+                        <li>Your custom paths configured in ComfyUI will be searched automatically</li>
+                        <li>Edit <code>ComfyUI/extra_model_paths.yaml</code> to add custom paths</li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Example extra_model_paths.yaml:</strong><br>
+                        <code>
+                        mymodels:<br>
+                        &nbsp;&nbsp;base_path: D:/AI/Models<br>
+                        &nbsp;&nbsp;checkpoints: checkpoints<br>
+                        &nbsp;&nbsp;loras: loras
+                        </code>
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>🔍</span> Model Not Found / Unknown URLs
+                </div>
+                <div class="wmd-help-section-content">
+                    If a model shows "Missing URLs / Unknown":
+                    <ol>
+                        <li><strong>Search URL:</strong> Click to search HuggingFace and CivitAI APIs</li>
+                        <li><strong>Lookup Hash:</strong> If you have the file, calculates SHA256 and searches CivitAI</li>
+                        <li><strong>Advanced Search:</strong> Uses AI-powered web search (requires Tavily API key)</li>
+                        <li><strong>Manual URL:</strong> Paste a direct download URL in the input field</li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Tip:</strong> For renamed models, try searching by the original filename or model type.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>🚀</span> Quick Tips
+                </div>
+                <div class="wmd-help-section-content">
+                    <ul style="list-style-type: disc; padding-left: 20px;">
+                        <li><strong>Downloads continue in background</strong> - You can close this dialog and downloads will keep running</li>
+                        <li><strong>Change directories</strong> - Use the dropdown to change where a model will be saved</li>
+                        <li><strong>Filter models</strong> - Use the dropdown in header to show only missing, existing, etc.</li>
+                        <li><strong>Settings persist</strong> - API keys are saved and remembered across sessions</li>
+                    </ul>
+                </div>
+            </div>
+        `;
+
+        return panel;
     }
 
     async loadSettings() {

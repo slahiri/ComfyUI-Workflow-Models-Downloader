@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-workflow-models-downloader"
 description = "Scan workflows for required models and download them automatically from HuggingFace, CivitAI, and other sources. Features include filter dropdowns, Tavily AI-powered advanced search, metadata caching, and automatic URL restoration."
-version = "1.7.0"
+version = "1.7.1"
 license = { file = "LICENSE" }
 readme = "README.md"
 requires-python = ">=3.9"

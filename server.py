@@ -845,25 +845,31 @@ def lookup_civitai_by_hash(file_hash):
 
 
 def find_model_file_path(target_dir, filename):
-    """Find the full path to a model file"""
-    models_dir = folder_paths.models_dir
+    """Find the full path to a model file, checking all configured model paths including extra_model_paths.yaml"""
 
     dirs_to_check = [target_dir]
     if target_dir in EQUIVALENT_DIRECTORIES:
         dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
 
     for check_dir in dirs_to_check:
-        # Check exact path
-        model_path = os.path.join(models_dir, check_dir, filename)
-        if os.path.exists(model_path):
-            return model_path
+        # Get all configured paths for this folder type (includes extra_model_paths.yaml)
+        try:
+            all_paths = folder_paths.get_folder_paths(check_dir)
+        except:
+            # Fallback to default models_dir if folder type not found
+            all_paths = [os.path.join(folder_paths.models_dir, check_dir)]
 
-        # Search subdirectories
-        base_dir = os.path.join(models_dir, check_dir)
-        if os.path.exists(base_dir):
-            for root, dirs, files in os.walk(base_dir):
-                if filename in files:
-                    return os.path.join(root, filename)
+        for base_path in all_paths:
+            # Check exact path
+            model_path = os.path.join(base_path, filename)
+            if os.path.exists(model_path):
+                return model_path
+
+            # Search subdirectories
+            if os.path.exists(base_path):
+                for root, dirs, files in os.walk(base_path):
+                    if filename in files:
+                        return os.path.join(root, filename)
 
     return None
 
@@ -898,8 +904,8 @@ EQUIVALENT_DIRECTORIES = {
 
 
 def check_model_exists(target_dir, filename):
-    """Check if model file exists in target directory, equivalent directories, or subdirectories"""
-    models_dir = folder_paths.models_dir
+    """Check if model file exists in target directory, equivalent directories, or subdirectories.
+    Supports extra_model_paths.yaml configurations."""
 
     # Get list of directories to check (including equivalent ones)
     dirs_to_check = [target_dir]
@@ -907,34 +913,41 @@ def check_model_exists(target_dir, filename):
         dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
 
     for check_dir in dirs_to_check:
-        # Check exact path
-        model_path = os.path.join(models_dir, check_dir, filename)
-        if os.path.exists(model_path):
-            try:
-                size_bytes = os.path.getsize(model_path)
-                size_mb = size_bytes / (1024 * 1024)
-                if size_mb >= 1024:
-                    return True, f"{size_mb/1024:.2f} GB"
-                else:
-                    return True, f"{size_mb:.1f} MB"
-            except:
-                return True, None
+        # Get all configured paths for this folder type (includes extra_model_paths.yaml)
+        try:
+            all_paths = folder_paths.get_folder_paths(check_dir)
+        except:
+            # Fallback to default models_dir if folder type not found
+            all_paths = [os.path.join(folder_paths.models_dir, check_dir)]
 
-        # Search in subdirectories (common for loras, checkpoints, etc.)
-        base_dir = os.path.join(models_dir, check_dir)
-        if os.path.exists(base_dir):
-            for root, dirs, files in os.walk(base_dir):
-                if filename in files:
-                    try:
-                        found_path = os.path.join(root, filename)
-                        size_bytes = os.path.getsize(found_path)
-                        size_mb = size_bytes / (1024 * 1024)
-                        if size_mb >= 1024:
-                            return True, f"{size_mb/1024:.2f} GB"
-                        else:
-                            return True, f"{size_mb:.1f} MB"
-                    except:
-                        return True, None
+        for base_path in all_paths:
+            # Check exact path
+            model_path = os.path.join(base_path, filename)
+            if os.path.exists(model_path):
+                try:
+                    size_bytes = os.path.getsize(model_path)
+                    size_mb = size_bytes / (1024 * 1024)
+                    if size_mb >= 1024:
+                        return True, f"{size_mb/1024:.2f} GB"
+                    else:
+                        return True, f"{size_mb:.1f} MB"
+                except:
+                    return True, None
+
+            # Search in subdirectories (common for loras, checkpoints, etc.)
+            if os.path.exists(base_path):
+                for root, dirs, files in os.walk(base_path):
+                    if filename in files:
+                        try:
+                            found_path = os.path.join(root, filename)
+                            size_bytes = os.path.getsize(found_path)
+                            size_mb = size_bytes / (1024 * 1024)
+                            if size_mb >= 1024:
+                                return True, f"{size_mb/1024:.2f} GB"
+                            else:
+                                return True, f"{size_mb:.1f} MB"
+                        except:
+                            return True, None
 
     return False, None
 
@@ -1644,6 +1657,21 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
 
         logging.info(f"[Workflow-Models-Downloader] Downloaded: {filename}")
 
+    except requests.exceptions.HTTPError as e:
+        error_msg = str(e)
+        if e.response is not None:
+            status_code = e.response.status_code
+            if status_code in [401, 403]:
+                if 'huggingface.co' in url:
+                    error_msg = f"Unauthorized (HTTP {status_code}): HuggingFace token required. Go to File > Settings > Workflow Models Downloader to configure your HuggingFace token. Get one at https://huggingface.co/settings/tokens"
+                else:
+                    error_msg = f"Unauthorized (HTTP {status_code}): Authentication required for this model."
+            elif status_code == 404:
+                error_msg = f"Model not found (HTTP 404): The file may have been moved or deleted."
+        logging.error(f"[Workflow-Models-Downloader] Download error: {error_msg}")
+        with download_lock:
+            download_progress[download_id]['status'] = 'error'
+            download_progress[download_id]['error'] = error_msg
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Download error: {e}")
         with download_lock:
@@ -1734,6 +1762,23 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 
         logging.info(f"[Workflow-Models-Downloader] Downloaded from URL: {filename}")
 
+    except requests.exceptions.HTTPError as e:
+        error_msg = str(e)
+        if e.response is not None:
+            status_code = e.response.status_code
+            if status_code in [401, 403]:
+                if 'huggingface.co' in url:
+                    error_msg = f"Unauthorized (HTTP {status_code}): HuggingFace token required. Go to File > Settings > Workflow Models Downloader to configure your HuggingFace token. Get one at https://huggingface.co/settings/tokens"
+                elif 'civitai.com' in url:
+                    error_msg = f"Unauthorized (HTTP {status_code}): CivitAI API key required. Go to File > Settings > Workflow Models Downloader to configure your CivitAI API key."
+                else:
+                    error_msg = f"Unauthorized (HTTP {status_code}): Authentication required for this model."
+            elif status_code == 404:
+                error_msg = f"Model not found (HTTP 404): The file may have been moved or deleted."
+        logging.error(f"[Workflow-Models-Downloader] URL download error: {error_msg}")
+        with download_lock:
+            download_progress[download_id]['status'] = 'error'
+            download_progress[download_id]['error'] = error_msg
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] URL download error: {e}")
         with download_lock:
