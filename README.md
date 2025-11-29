@@ -47,10 +47,10 @@ Browse all your installed models organized by folder. Features include:
 
 ![Local Browser Tab](images/local-browser-tab.png)
 
-### Settings Tab
-Configure API keys for HuggingFace, CivitAI, and Tavily (AI-powered search). Set max parallel downloads and view aria2 availability for faster downloads with resume support.
+### Settings (ComfyUI Menu)
+Configure API keys for HuggingFace, CivitAI, and Tavily (AI-powered search) in ComfyUI's Settings menu under "Workflow Models Downloader".
 
-![Settings Tab](images/settings-tab.png)
+![Settings](images/file-settings.png)
 
 ### Help Tab
 Built-in FAQ and troubleshooting guide covering API key setup, common errors, and tips.
