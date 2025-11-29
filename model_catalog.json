@@ -1,0 +1,284 @@
+{
+  "version": "1.0.0",
+  "description": "Curated model catalog with verified download paths",
+  "updated_at": "2025-01-29",
+  "models": [
+    {
+      "filename": "flux1-dev-fp8.safetensors",
+      "source": "huggingface",
+      "repo_id": "Kijai/flux-fp8",
+      "hf_path": "flux1-dev-fp8.safetensors",
+      "model_type": "unet",
+      "local_path": "unet/FLUX1",
+      "base_model": "FLUX.1",
+      "tags": ["flux", "fp8", "dev"]
+    },
+    {
+      "filename": "flux1-schnell-fp8.safetensors",
+      "source": "huggingface",
+      "repo_id": "Kijai/flux-fp8",
+      "hf_path": "flux1-schnell-fp8.safetensors",
+      "model_type": "unet",
+      "local_path": "unet/FLUX1",
+      "base_model": "FLUX.1",
+      "tags": ["flux", "fp8", "schnell"]
+    },
+    {
+      "filename": "ae.safetensors",
+      "source": "huggingface",
+      "repo_id": "black-forest-labs/FLUX.1-dev",
+      "hf_path": "ae.safetensors",
+      "model_type": "vae",
+      "local_path": "vae/FLUX1",
+      "base_model": "FLUX.1",
+      "protected": true,
+      "tags": ["flux", "vae", "autoencoder"]
+    },
+    {
+      "filename": "t5xxl_fp8_e4m3fn.safetensors",
+      "source": "huggingface",
+      "repo_id": "comfyanonymous/flux_text_encoders",
+      "hf_path": "t5xxl_fp8_e4m3fn.safetensors",
+      "model_type": "text_encoders",
+      "local_path": "text_encoders/t5",
+      "base_model": "FLUX.1",
+      "tags": ["flux", "t5", "text-encoder", "fp8"]
+    },
+    {
+      "filename": "t5xxl_fp16.safetensors",
+      "source": "huggingface",
+      "repo_id": "comfyanonymous/flux_text_encoders",
+      "hf_path": "t5xxl_fp16.safetensors",
+      "model_type": "text_encoders",
+      "local_path": "text_encoders/t5",
+      "base_model": "FLUX.1",
+      "tags": ["flux", "t5", "text-encoder", "fp16"]
+    },
+    {
+      "filename": "clip_l.safetensors",
+      "source": "huggingface",
+      "repo_id": "comfyanonymous/flux_text_encoders",
+      "hf_path": "clip_l.safetensors",
+      "model_type": "text_encoders",
+      "local_path": "text_encoders",
+      "base_model": "FLUX.1",
+      "tags": ["flux", "clip", "text-encoder"]
+    },
+    {
+      "filename": "flux1-depth-dev-lora.safetensors",
+      "source": "huggingface",
+      "repo_id": "black-forest-labs/FLUX.1-Depth-dev-lora",
+      "hf_path": "flux1-depth-dev-lora.safetensors",
+      "model_type": "loras",
+      "local_path": "loras",
+      "base_model": "FLUX.1",
+      "protected": true,
+      "tags": ["flux", "depth", "lora", "controlnet"]
+    },
+    {
+      "filename": "flux1-canny-dev-lora.safetensors",
+      "source": "huggingface",
+      "repo_id": "black-forest-labs/FLUX.1-Canny-dev-lora",
+      "hf_path": "flux1-canny-dev-lora.safetensors",
+      "model_type": "loras",
+      "local_path": "loras",
+      "base_model": "FLUX.1",
+      "protected": true,
+      "tags": ["flux", "canny", "lora", "controlnet"]
+    },
+    {
+      "filename": "CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors",
+      "source": "huggingface",
+      "repo_id": "h94/IP-Adapter",
+      "hf_path": "models/image_encoder/model.safetensors",
+      "model_type": "clip_vision",
+      "local_path": "clip_vision",
+      "tags": ["clip", "vision", "ipadapter"]
+    },
+    {
+      "filename": "CLIP-ViT-bigG-14-laion2B-39B-b160k.safetensors",
+      "source": "huggingface",
+      "repo_id": "h94/IP-Adapter",
+      "hf_path": "sdxl_models/image_encoder/model.safetensors",
+      "model_type": "clip_vision",
+      "local_path": "clip_vision",
+      "base_model": "SDXL",
+      "tags": ["clip", "vision", "ipadapter", "sdxl"]
+    },
+    {
+      "filename": "ip-adapter-plus_sdxl_vit-h.safetensors",
+      "source": "huggingface",
+      "repo_id": "h94/IP-Adapter",
+      "hf_path": "sdxl_models/ip-adapter-plus_sdxl_vit-h.safetensors",
+      "model_type": "ipadapter",
+      "local_path": "ipadapter",
+      "base_model": "SDXL",
+      "tags": ["ipadapter", "sdxl"]
+    },
+    {
+      "filename": "ip-adapter_sdxl_vit-h.safetensors",
+      "source": "huggingface",
+      "repo_id": "h94/IP-Adapter",
+      "hf_path": "sdxl_models/ip-adapter_sdxl_vit-h.safetensors",
+      "model_type": "ipadapter",
+      "local_path": "ipadapter",
+      "base_model": "SDXL",
+      "tags": ["ipadapter", "sdxl"]
+    },
+    {
+      "filename": "control_v11p_sd15_canny.pth",
+      "source": "huggingface",
+      "repo_id": "lllyasviel/ControlNet-v1-1",
+      "hf_path": "control_v11p_sd15_canny.pth",
+      "model_type": "controlnet",
+      "local_path": "controlnet",
+      "base_model": "SD1.5",
+      "tags": ["controlnet", "canny", "sd15"]
+    },
+    {
+      "filename": "control_v11p_sd15_openpose.pth",
+      "source": "huggingface",
+      "repo_id": "lllyasviel/ControlNet-v1-1",
+      "hf_path": "control_v11p_sd15_openpose.pth",
+      "model_type": "controlnet",
+      "local_path": "controlnet",
+      "base_model": "SD1.5",
+      "tags": ["controlnet", "openpose", "sd15"]
+    },
+    {
+      "filename": "control_v11f1p_sd15_depth.pth",
+      "source": "huggingface",
+      "repo_id": "lllyasviel/ControlNet-v1-1",
+      "hf_path": "control_v11f1p_sd15_depth.pth",
+      "model_type": "controlnet",
+      "local_path": "controlnet",
+      "base_model": "SD1.5",
+      "tags": ["controlnet", "depth", "sd15"]
+    },
+    {
+      "filename": "diffusion_pytorch_model.fp16.safetensors",
+      "source": "huggingface",
+      "repo_id": "diffusers/controlnet-canny-sdxl-1.0",
+      "hf_path": "diffusion_pytorch_model.fp16.safetensors",
+      "model_type": "controlnet",
+      "local_path": "controlnet/SDXL",
+      "base_model": "SDXL",
+      "tags": ["controlnet", "canny", "sdxl"]
+    },
+    {
+      "filename": "wan_2.1_vae.safetensors",
+      "source": "huggingface",
+      "repo_id": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+      "hf_path": "split_files/vae/wan_2.1_vae.safetensors",
+      "model_type": "vae",
+      "local_path": "vae",
+      "base_model": "Wan",
+      "tags": ["wan", "vae", "video"]
+    },
+    {
+      "filename": "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "source": "huggingface",
+      "repo_id": "Comfy-Org/Wan_2.2_ComfyUI_Repackaged",
+      "hf_path": "split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors",
+      "model_type": "text_encoders",
+      "local_path": "text_encoders",
+      "base_model": "Wan",
+      "tags": ["wan", "umt5", "text-encoder", "fp8"]
+    },
+    {
+      "filename": "4x-UltraSharp.pth",
+      "source": "huggingface",
+      "repo_id": "Kim2091/UltraSharp",
+      "hf_path": "4x-UltraSharp.pth",
+      "model_type": "upscale_models",
+      "local_path": "upscale_models",
+      "tags": ["upscaler", "4x"]
+    },
+    {
+      "filename": "RealESRGAN_x4plus.pth",
+      "source": "huggingface",
+      "repo_id": "sberbank-ai/Real-ESRGAN",
+      "hf_path": "RealESRGAN_x4plus.pth",
+      "model_type": "upscale_models",
+      "local_path": "upscale_models",
+      "tags": ["upscaler", "4x", "realesrgan"]
+    },
+    {
+      "filename": "RealESRGAN_x4plus_anime_6B.pth",
+      "source": "huggingface",
+      "repo_id": "sberbank-ai/Real-ESRGAN",
+      "hf_path": "RealESRGAN_x4plus_anime_6B.pth",
+      "model_type": "upscale_models",
+      "local_path": "upscale_models",
+      "tags": ["upscaler", "4x", "realesrgan", "anime"]
+    },
+    {
+      "filename": "v1-5-pruned-emaonly.safetensors",
+      "source": "huggingface",
+      "repo_id": "runwayml/stable-diffusion-v1-5",
+      "hf_path": "v1-5-pruned-emaonly.safetensors",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SD1.5",
+      "tags": ["sd15", "checkpoint", "base"]
+    },
+    {
+      "filename": "sd_xl_base_1.0.safetensors",
+      "source": "huggingface",
+      "repo_id": "stabilityai/stable-diffusion-xl-base-1.0",
+      "hf_path": "sd_xl_base_1.0.safetensors",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SDXL",
+      "tags": ["sdxl", "checkpoint", "base"]
+    },
+    {
+      "filename": "sd_xl_refiner_1.0.safetensors",
+      "source": "huggingface",
+      "repo_id": "stabilityai/stable-diffusion-xl-refiner-1.0",
+      "hf_path": "sd_xl_refiner_1.0.safetensors",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SDXL",
+      "tags": ["sdxl", "checkpoint", "refiner"]
+    },
+    {
+      "filename": "sdxl_vae.safetensors",
+      "source": "huggingface",
+      "repo_id": "stabilityai/sdxl-vae",
+      "hf_path": "sdxl_vae.safetensors",
+      "model_type": "vae",
+      "local_path": "vae",
+      "base_model": "SDXL",
+      "tags": ["sdxl", "vae"]
+    },
+    {
+      "filename": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+      "source": "huggingface",
+      "repo_id": "RunDiffusion/Juggernaut-XL-v9",
+      "hf_path": "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SDXL",
+      "tags": ["sdxl", "juggernaut", "photorealistic"]
+    },
+    {
+      "filename": "dreamshaperXL_v21TurboDPMSDE.safetensors",
+      "source": "civitai",
+      "civitai_model_id": "112902",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SDXL",
+      "tags": ["sdxl", "dreamshaper", "turbo"]
+    },
+    {
+      "filename": "realisticVisionV60B1_v51VAE.safetensors",
+      "source": "civitai",
+      "civitai_model_id": "4201",
+      "model_type": "checkpoints",
+      "local_path": "checkpoints",
+      "base_model": "SD1.5",
+      "tags": ["sd15", "realistic", "photorealistic"]
+    }
+  ]
+}

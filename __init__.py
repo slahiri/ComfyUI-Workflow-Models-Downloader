@@ -28,6 +28,7 @@ def check_requirements():
         "tavily-python": "tavily",
         "huggingface_hub": "huggingface_hub",
         "huggingface-hub": "huggingface_hub",
+        "pyyaml": "yaml",
     }
 
     missing = []
@@ -77,6 +78,14 @@ if extension_path not in sys.path:
 
 # Import and register the server routes
 from . import server
+
+# Initialize database and run migrations if needed
+try:
+    from . import storage
+    storage.init_storage()
+except Exception as e:
+    import logging
+    logging.warning(f"[WMD] Storage initialization skipped: {e}")
 
 WEB_DIRECTORY = "js"
 NODE_CLASS_MAPPINGS = {}

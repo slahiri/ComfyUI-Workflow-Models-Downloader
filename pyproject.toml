@@ -10,6 +10,7 @@ dependencies = [
     "huggingface_hub",
     "tavily-python",
     "aiohttp",
+    "pyyaml",
 ]
 
 [project.urls]

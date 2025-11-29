@@ -17,11 +17,32 @@ from logging.handlers import RotatingFileHandler
 import folder_paths
 from server import PromptServer
 
+# Import search utilities
+from . import search_utils
+
 # Get routes from ComfyUI server
 routes = PromptServer.instance.routes
 
 # Extension path
 EXTENSION_PATH = os.path.dirname(__file__)
+
+# =============================================================================
+# SQLite STORAGE LAYER (opt-in migration from JSON files)
+# =============================================================================
+# Set USE_SQLITE = True to use SQLite storage instead of JSON files
+# This is a gradual migration - set to False to use legacy JSON storage
+USE_SQLITE = os.environ.get('WMD_USE_SQLITE', 'false').lower() == 'true'
+
+# Try to import storage module for SQLite support
+_storage_available = False
+try:
+    if USE_SQLITE:
+        from . import storage as _storage
+        _storage_available = True
+        logging.info("[WMD] SQLite storage enabled")
+except ImportError as e:
+    logging.debug(f"[WMD] SQLite storage not available: {e}")
+    USE_SQLITE = False
 
 # Setup file logging
 LOG_FILE = os.path.join(EXTENSION_PATH, 'wmd.log')
@@ -153,6 +174,11 @@ import shutil
 def load_settings():
     """Load settings from settings.json or ComfyUI's native settings"""
     global _settings_cache
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        return _storage.load_settings()
+
     if _settings_cache is not None:
         return _settings_cache
 
@@ -201,6 +227,11 @@ def load_settings():
 def save_settings(settings):
     """Save settings to settings.json"""
     global _settings_cache
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        return _storage.save_settings(settings)
+
     try:
         with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2)
@@ -215,6 +246,12 @@ def save_settings(settings):
 def load_download_history():
     """Load download history from file"""
     global download_history
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        download_history = _storage.load_download_history()
+        return download_history
+
     try:
         if os.path.exists(DOWNLOAD_HISTORY_FILE):
             with open(DOWNLOAD_HISTORY_FILE, 'r', encoding='utf-8') as f:
@@ -230,6 +267,11 @@ def load_download_history():
 def save_download_history():
     """Save download history to file"""
     global download_history
+
+    # Use SQLite storage if enabled (no-op, auto-saved)
+    if USE_SQLITE and _storage_available:
+        return True
+
     try:
         with open(DOWNLOAD_HISTORY_FILE, 'w', encoding='utf-8') as f:
             json.dump(download_history, f, indent=2)
@@ -245,6 +287,12 @@ _tavily_cache = {}
 def load_tavily_cache():
     """Load Tavily search cache from file"""
     global _tavily_cache
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        _tavily_cache = _storage.load_tavily_cache()
+        return _tavily_cache
+
     try:
         if os.path.exists(TAVILY_CACHE_FILE):
             with open(TAVILY_CACHE_FILE, 'r', encoding='utf-8') as f:
@@ -260,6 +308,11 @@ def load_tavily_cache():
 def save_tavily_cache():
     """Save Tavily search cache to file"""
     global _tavily_cache
+
+    # Use SQLite storage if enabled (no-op, auto-saved)
+    if USE_SQLITE and _storage_available:
+        return True
+
     try:
         with open(TAVILY_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(_tavily_cache, f, indent=2)
@@ -272,6 +325,11 @@ def save_tavily_cache():
 def get_tavily_cached_result(filename):
     """Get cached Tavily search result for a filename"""
     global _tavily_cache
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        return _storage.get_tavily_cached_result(filename)
+
     return _tavily_cache.get(filename)
 
 
@@ -280,6 +338,12 @@ def set_tavily_cached_result(filename, data):
     global _tavily_cache
     import datetime
     data['cached_at'] = datetime.datetime.now().isoformat()
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        _storage.set_tavily_cached_result(filename, data)
+        return
+
     _tavily_cache[filename] = data
     save_tavily_cache()
 
@@ -297,7 +361,9 @@ def add_to_download_history(download_info):
         'error': download_info.get('error', ''),
         'total_size': download_info.get('total_size', 0),
         'timestamp': datetime.datetime.now().isoformat(),
-        'directory': download_info.get('directory', '')
+        'directory': download_info.get('directory', ''),
+        'url': download_info.get('url', ''),
+        'source': download_info.get('source', '')
     }
 
     # If download completed successfully, invalidate folder cache so the file is discoverable
@@ -307,6 +373,11 @@ def add_to_download_history(download_info):
         if folder_type:
             invalidate_folder_cache(folder_type)
             logging.info(f"[WMD] Download complete, cache invalidated for: {folder_type}")
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        _storage.add_to_download_history(entry)
+        return
 
     # Remove any existing entry with same filename to avoid duplicates
     download_history = [h for h in download_history if h.get('filename') != entry['filename']]
@@ -323,6 +394,13 @@ def add_to_download_history(download_info):
 def clear_download_history():
     """Clear all download history"""
     global download_history
+
+    # Use SQLite storage if enabled
+    if USE_SQLITE and _storage_available:
+        _storage.clear_download_history()
+        download_history = []
+        return
+
     download_history = []
     save_download_history()
 
@@ -699,8 +777,47 @@ def lookup_url_in_model_list(filename):
     return None
 
 
+def search_model_catalog(filename):
+    """Search the model catalog for a known model"""
+    try:
+        entry = search_utils.lookup_catalog(filename)
+        if entry:
+            source = entry.get('source', '')
+            if source == 'huggingface':
+                repo_id = entry.get('repo_id', '')
+                hf_path = entry.get('hf_path', filename)
+                if repo_id:
+                    url = f"https://huggingface.co/{repo_id}/resolve/main/{hf_path}"
+                    logging.info(f"[WMD] Catalog match: {filename} -> {repo_id}")
+                    return {
+                        'url': url,
+                        'source': 'catalog_huggingface',
+                        'repo_id': repo_id,
+                        'hf_path': hf_path,
+                        'model_type': entry.get('model_type', ''),
+                        'local_path': entry.get('local_path', ''),
+                        'protected': entry.get('protected', False)
+                    }
+            elif source == 'civitai':
+                model_id = entry.get('civitai_model_id')
+                version_id = entry.get('civitai_version_id')
+                if version_id:
+                    url = f"https://civitai.com/api/download/models/{version_id}"
+                    return {
+                        'url': url,
+                        'source': 'catalog_civitai',
+                        'civitai_model_id': model_id,
+                        'civitai_version_id': version_id,
+                        'model_type': entry.get('model_type', ''),
+                        'local_path': entry.get('local_path', '')
+                    }
+    except Exception as e:
+        logging.debug(f"[WMD] Catalog search failed: {e}")
+    return None
+
+
 def search_huggingface_api(filename):
-    """Search HuggingFace API for a model file"""
+    """Search HuggingFace API for a model file using multi-strategy search"""
     global _url_search_cache
 
     cache_key = f"hf_{filename}"
@@ -710,33 +827,72 @@ def search_huggingface_api(filename):
     try:
         import requests
 
-        # Search for repos containing this filename
-        filename_base = os.path.splitext(filename)[0]
-        search_url = f"https://huggingface.co/api/models?search={urllib.parse.quote(filename_base)}&limit=5"
+        # Generate multiple search queries using different strategies
+        search_queries = search_utils.generate_search_queries(filename)
+        all_candidates = []
 
-        response = requests.get(search_url, timeout=10)
-        if response.status_code == 200:
-            repos = response.json()
+        for strategy_name, query in search_queries:
+            try:
+                search_url = f"https://huggingface.co/api/models?search={urllib.parse.quote(query)}&limit=5"
+                response = requests.get(search_url, timeout=10)
 
-            for repo in repos:
-                repo_id = repo.get('id', '')
-                if not repo_id:
-                    continue
+                if response.status_code == 200:
+                    repos = response.json()
 
-                # Check if this repo has the file
-                files_url = f"https://huggingface.co/api/models/{repo_id}/tree/main"
-                try:
-                    files_response = requests.get(files_url, timeout=10)
-                    if files_response.status_code == 200:
-                        files = files_response.json()
-                        for file_info in files:
-                            if file_info.get('path', '').endswith(filename):
-                                url = f"https://huggingface.co/{repo_id}/resolve/main/{file_info['path']}"
-                                _url_search_cache[cache_key] = url
-                                logging.info(f"[Workflow-Models-Downloader] Found {filename} on HuggingFace: {repo_id}")
-                                return url
-                except:
-                    continue
+                    for repo in repos:
+                        repo_id = repo.get('id', '')
+                        if not repo_id:
+                            continue
+
+                        # Check if this repo has the file
+                        files_url = f"https://huggingface.co/api/models/{repo_id}/tree/main"
+                        try:
+                            files_response = requests.get(files_url, timeout=10)
+                            if files_response.status_code == 200:
+                                files = files_response.json()
+                                for file_info in files:
+                                    file_path = file_info.get('path', '')
+                                    # Exact match
+                                    if file_path.endswith(filename):
+                                        url = f"https://huggingface.co/{repo_id}/resolve/main/{file_path}"
+                                        _url_search_cache[cache_key] = url
+                                        logging.info(f"[WMD] HuggingFace exact match ({strategy_name}): {filename} in {repo_id}")
+                                        return url
+
+                                    # Collect model files for similarity matching
+                                    if file_path.endswith(('.safetensors', '.ckpt', '.pt', '.bin', '.pth')):
+                                        all_candidates.append({
+                                            'name': os.path.basename(file_path),
+                                            'path': file_path,
+                                            'repo_id': repo_id,
+                                            'strategy': strategy_name
+                                        })
+                        except:
+                            continue
+            except Exception as e:
+                logging.debug(f"[WMD] HuggingFace search strategy '{strategy_name}' failed: {e}")
+                continue
+
+        # Use similarity matching on all candidates
+        if all_candidates:
+            # Deduplicate by repo_id + path
+            seen = set()
+            unique_candidates = []
+            for c in all_candidates:
+                key = f"{c['repo_id']}/{c['path']}"
+                if key not in seen:
+                    seen.add(key)
+                    unique_candidates.append(c)
+
+            best_match = search_utils.find_best_match(filename, unique_candidates, 'name', threshold=0.5)
+            if best_match:
+                repo_id = best_match['repo_id']
+                file_path = best_match['path']
+                url = f"https://huggingface.co/{repo_id}/resolve/main/{file_path}"
+                score = best_match.get('_similarity_score', 0)
+                logging.info(f"[WMD] HuggingFace similarity match: {filename} -> {best_match['name']} in {repo_id} (score: {score:.2f})")
+                _url_search_cache[cache_key] = url
+                return url
 
     except Exception as e:
         logging.debug(f"[Workflow-Models-Downloader] HuggingFace API search failed: {e}")
@@ -746,7 +902,7 @@ def search_huggingface_api(filename):
 
 
 def search_civitai_api(filename):
-    """Search CivitAI API for a model file"""
+    """Search CivitAI API for a model file using multi-strategy search"""
     global _url_search_cache
 
     cache_key = f"civit_{filename}"
@@ -756,30 +912,63 @@ def search_civitai_api(filename):
     try:
         import requests
 
-        # Search by filename
-        filename_base = os.path.splitext(filename)[0]
-        # Remove common suffixes for better search
-        search_name = re.sub(r'[-_]?(fp16|fp8|bf16|e4m3fn|scaled|pruned|emaonly).*', '', filename_base, flags=re.IGNORECASE)
+        # Generate multiple search queries using different strategies
+        search_queries = search_utils.generate_search_queries(filename)
+        all_candidates = []
 
-        search_url = f"https://civitai.com/api/v1/models?query={urllib.parse.quote(search_name)}&limit=5"
+        for strategy_name, query in search_queries:
+            try:
+                search_url = f"https://civitai.com/api/v1/models?query={urllib.parse.quote(query)}&limit=5"
+                response = requests.get(search_url, timeout=10)
 
-        response = requests.get(search_url, timeout=10)
-        if response.status_code == 200:
-            data = response.json()
-            items = data.get('items', [])
+                if response.status_code == 200:
+                    data = response.json()
+                    items = data.get('items', [])
 
-            for item in items:
-                model_versions = item.get('modelVersions', [])
-                for version in model_versions:
-                    files = version.get('files', [])
-                    for file_info in files:
-                        file_name = file_info.get('name', '')
-                        if file_name.lower() == filename.lower():
-                            url = file_info.get('downloadUrl', '')
-                            if url:
-                                _url_search_cache[cache_key] = url
-                                logging.info(f"[Workflow-Models-Downloader] Found {filename} on CivitAI")
-                                return url
+                    for item in items:
+                        model_versions = item.get('modelVersions', [])
+                        for version in model_versions:
+                            files = version.get('files', [])
+                            for file_info in files:
+                                file_name = file_info.get('name', '')
+                                if file_name:
+                                    # Exact match - return immediately
+                                    if file_name.lower() == filename.lower():
+                                        url = file_info.get('downloadUrl', '')
+                                        if url:
+                                            _url_search_cache[cache_key] = url
+                                            logging.info(f"[WMD] CivitAI exact match ({strategy_name}): {filename}")
+                                            return url
+
+                                    # Collect for similarity matching
+                                    all_candidates.append({
+                                        'name': file_name,
+                                        'url': file_info.get('downloadUrl', ''),
+                                        'model_name': item.get('name', ''),
+                                        'strategy': strategy_name
+                                    })
+            except Exception as e:
+                logging.debug(f"[WMD] CivitAI search strategy '{strategy_name}' failed: {e}")
+                continue
+
+        # Use similarity matching on all candidates
+        if all_candidates:
+            # Deduplicate by URL
+            seen_urls = set()
+            unique_candidates = []
+            for c in all_candidates:
+                if c['url'] and c['url'] not in seen_urls:
+                    seen_urls.add(c['url'])
+                    unique_candidates.append(c)
+
+            best_match = search_utils.find_best_match(filename, unique_candidates, 'name', threshold=0.5)
+            if best_match:
+                url = best_match.get('url', '')
+                if url:
+                    score = best_match.get('_similarity_score', 0)
+                    logging.info(f"[WMD] CivitAI similarity match: {filename} -> {best_match['name']} (score: {score:.2f})")
+                    _url_search_cache[cache_key] = url
+                    return url
 
     except Exception as e:
         logging.debug(f"[Workflow-Models-Downloader] CivitAI API search failed: {e}")
@@ -915,11 +1104,17 @@ def search_tavily_api(filename):
 def find_model_url(filename, search_apis=False):
     """
     Try to find download URL for a model using multiple sources:
+    0. Model catalog (curated list with verified paths)
     1. Popular models registry (curated list)
     2. model-list.json (ComfyUI Manager)
-    3. HuggingFace API search (if search_apis=True)
-    4. CivitAI API search (if search_apis=True)
+    3. HuggingFace API search with multi-strategy (if search_apis=True)
+    4. CivitAI API search with multi-strategy (if search_apis=True)
     """
+    # 0. Check model catalog first (highest priority)
+    catalog_result = search_model_catalog(filename)
+    if catalog_result and catalog_result.get('url'):
+        return catalog_result['url'], catalog_result.get('source', 'catalog')
+
     # 1. Check popular models registry
     url = lookup_url_in_popular_models(filename)
     if url:
@@ -930,13 +1125,13 @@ def find_model_url(filename, search_apis=False):
     if url:
         return url, 'model_list'
 
-    # 3. Search HuggingFace API
+    # 3. Search HuggingFace API (with multi-strategy search)
     if search_apis:
         url = search_huggingface_api(filename)
         if url:
             return url, 'huggingface_api'
 
-        # 4. Search CivitAI API
+        # 4. Search CivitAI API (with multi-strategy search)
         url = search_civitai_api(filename)
         if url:
             return url, 'civitai_api'
@@ -2812,6 +3007,215 @@ async def lookup_by_hash(request):
         return web.json_response({'error': str(e)}, status=500)
 
 
+@routes.post("/workflow-models/parse-civitai-url")
+async def parse_civitai_url(request):
+    """Parse CivitAI URL (image, model page, or URN) to extract model info"""
+    try:
+        data = await request.json()
+        url = data.get('url', '')
+
+        if not url:
+            return web.json_response({'error': 'Missing url'}, status=400)
+
+        result = {
+            'success': False,
+            'url': url,
+            'type': None
+        }
+
+        # Try parsing as URN first
+        urn_result = search_utils.parse_civitai_urn(url)
+        if urn_result:
+            model_id, version_id = urn_result
+            result.update({
+                'success': True,
+                'type': 'urn',
+                'model_id': model_id,
+                'version_id': version_id,
+                'model_url': f"https://civitai.com/models/{model_id}?modelVersionId={version_id}",
+                'download_url': f"https://civitai.com/api/download/models/{version_id}"
+            })
+            return web.json_response(result)
+
+        # Try parsing as image URL
+        image_result = search_utils.parse_civitai_image_url(url)
+        if image_result:
+            model_id, version_id = image_result
+            result.update({
+                'success': True,
+                'type': 'image',
+                'model_id': model_id,
+                'version_id': version_id,
+                'model_url': f"https://civitai.com/models/{model_id}" + (f"?modelVersionId={version_id}" if version_id else "")
+            })
+
+            # Try to get download URL from API if we have version_id
+            if version_id:
+                result['download_url'] = f"https://civitai.com/api/download/models/{version_id}"
+            elif model_id:
+                # Fetch model info to get latest version
+                try:
+                    import requests
+                    api_url = f"https://civitai.com/api/v1/models/{model_id}"
+                    response = requests.get(api_url, timeout=10)
+                    if response.status_code == 200:
+                        model_data = response.json()
+                        versions = model_data.get('modelVersions', [])
+                        if versions:
+                            latest_version = versions[0]
+                            result['version_id'] = str(latest_version.get('id'))
+                            result['model_name'] = model_data.get('name')
+                            result['version_name'] = latest_version.get('name')
+                            files = latest_version.get('files', [])
+                            if files:
+                                result['download_url'] = files[0].get('downloadUrl')
+                                result['filename'] = files[0].get('name')
+                except Exception as e:
+                    logging.debug(f"[WMD] Failed to fetch CivitAI model info: {e}")
+
+            return web.json_response(result)
+
+        # Try parsing as model page URL
+        model_match = re.search(r'civitai\.com/models/(\d+)', url)
+        if model_match:
+            model_id = model_match.group(1)
+            version_match = re.search(r'modelVersionId=(\d+)', url)
+            version_id = version_match.group(1) if version_match else None
+
+            result.update({
+                'success': True,
+                'type': 'model_page',
+                'model_id': model_id,
+                'version_id': version_id,
+                'model_url': f"https://civitai.com/models/{model_id}" + (f"?modelVersionId={version_id}" if version_id else "")
+            })
+
+            if version_id:
+                result['download_url'] = f"https://civitai.com/api/download/models/{version_id}"
+
+            return web.json_response(result)
+
+        return web.json_response(result)
+
+    except Exception as e:
+        logging.error(f"[WMD] Parse CivitAI URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/catalog-lookup")
+async def catalog_lookup(request):
+    """Look up a model in the curated catalog"""
+    try:
+        data = await request.json()
+        filename = data.get('filename', '')
+
+        if not filename:
+            return web.json_response({'error': 'Missing filename'}, status=400)
+
+        result = search_model_catalog(filename)
+
+        if result:
+            return web.json_response({
+                'success': True,
+                'filename': filename,
+                **result
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'filename': filename,
+                'message': 'Model not found in catalog'
+            })
+
+    except Exception as e:
+        logging.error(f"[WMD] Catalog lookup error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/save-description")
+async def save_model_description(request):
+    """Save a model description file (.md with YAML frontmatter)"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+        directory = data.get('directory')
+        metadata = data.get('metadata', {})
+        description = data.get('description', '')
+
+        if not filename or not directory:
+            return web.json_response({'error': 'Missing filename or directory'}, status=400)
+
+        # Find the model file
+        filepath = find_model_file_path(directory, filename)
+
+        if not filepath:
+            return web.json_response({
+                'success': False,
+                'message': 'Model file not found'
+            })
+
+        # Save description
+        success = search_utils.save_model_description(filepath, metadata, description)
+
+        if success:
+            desc_path = search_utils.get_description_path(filepath)
+            return web.json_response({
+                'success': True,
+                'message': 'Description saved',
+                'path': desc_path
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'message': 'Failed to save description'
+            })
+
+    except Exception as e:
+        logging.error(f"[WMD] Save description error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/model-description")
+async def get_model_description(request):
+    """Get a model's description file content"""
+    try:
+        filename = request.query.get('filename')
+        directory = request.query.get('directory')
+
+        if not filename or not directory:
+            return web.json_response({'error': 'Missing filename or directory'}, status=400)
+
+        # Find the model file
+        filepath = find_model_file_path(directory, filename)
+
+        if not filepath:
+            return web.json_response({
+                'success': False,
+                'message': 'Model file not found'
+            })
+
+        # Load description
+        desc_data = search_utils.load_model_description(filepath)
+
+        if desc_data:
+            return web.json_response({
+                'success': True,
+                'filename': filename,
+                'frontmatter': desc_data.get('frontmatter', {}),
+                'content': desc_data.get('content', ''),
+                'raw': desc_data.get('raw', '')
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'message': 'No description file found'
+            })
+
+    except Exception as e:
+        logging.error(f"[WMD] Get description error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
 @routes.post("/workflow-models/download-url")
 async def download_from_url(request):
     """Download a model from a direct URL or CivitAI URN"""
@@ -2984,6 +3388,217 @@ async def delete_history_item_endpoint(request):
             return web.json_response({'success': True})
         return web.json_response({'error': 'Missing filename'}, status=400)
     except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# =============================================================================
+# RELIABILITY ENDPOINTS (Phase 4)
+# =============================================================================
+
+@routes.post("/workflow-models/check-exists")
+async def check_file_exists_endpoint(request):
+    """Check if a file already exists or was previously downloaded"""
+    try:
+        from . import reliability
+
+        data = await request.json()
+        filename = data.get('filename')
+        directory = data.get('directory')
+
+        if not filename:
+            return web.json_response({'error': 'filename required'}, status=400)
+
+        # Build full directory path
+        if directory:
+            full_dir = os.path.join(folder_paths.models_dir, directory)
+        else:
+            full_dir = None
+
+        result = reliability.check_already_downloaded(filename, full_dir)
+
+        return web.json_response({
+            'success': True,
+            **result
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Check exists error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/check-disk-space")
+async def check_disk_space_endpoint(request):
+    """Check if there's enough disk space for a download"""
+    try:
+        from . import reliability
+
+        data = await request.json()
+        directory = data.get('directory')
+        required_bytes = data.get('size', 0)
+        url = data.get('url')
+        filename = data.get('filename')
+
+        if not directory:
+            return web.json_response({'error': 'directory required'}, status=400)
+
+        full_dir = os.path.join(folder_paths.models_dir, directory)
+
+        # Estimate size if not provided
+        if not required_bytes:
+            required_bytes = reliability.estimate_download_size(url, filename)
+            if not required_bytes:
+                required_bytes = 2 * 1024 * 1024 * 1024  # Default 2GB estimate
+
+        result = reliability.check_disk_space(full_dir, required_bytes)
+
+        return web.json_response({
+            'success': True,
+            **result
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Check disk space error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/disk-space")
+async def get_disk_space_endpoint(request):
+    """Get disk space info for models directory"""
+    try:
+        from . import reliability
+
+        space = reliability.get_disk_space(folder_paths.models_dir)
+
+        return web.json_response({
+            'success': True,
+            'path': folder_paths.models_dir,
+            'total': space['total'],
+            'used': space['used'],
+            'free': space['free'],
+            'percent_used': space['percent_used'],
+            'total_str': reliability.format_bytes(space['total']),
+            'used_str': reliability.format_bytes(space['used']),
+            'free_str': reliability.format_bytes(space['free'])
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Get disk space error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/duplicates")
+async def find_duplicates_endpoint(request):
+    """Find duplicate models by hash and name"""
+    try:
+        from . import reliability
+
+        # Get query params
+        by_hash = request.query.get('by_hash', 'true').lower() == 'true'
+        by_name = request.query.get('by_name', 'true').lower() == 'true'
+
+        result = {
+            'success': True,
+            'by_hash': {},
+            'by_name': {},
+            'hash_duplicate_count': 0,
+            'name_duplicate_count': 0,
+            'total_wasted_space': 0,
+            'wasted_space_str': '0 bytes'
+        }
+
+        if by_hash:
+            hash_dupes = reliability.find_duplicates_by_hash()
+            result['by_hash'] = hash_dupes
+            result['hash_duplicate_count'] = len(hash_dupes)
+
+            # Calculate wasted space
+            wasted = 0
+            for files in hash_dupes.values():
+                sorted_files = sorted(files, key=lambda x: x['size'], reverse=True)
+                for f in sorted_files[1:]:
+                    wasted += f['size']
+            result['total_wasted_space'] = wasted
+            result['wasted_space_str'] = reliability.format_bytes(wasted)
+
+        if by_name:
+            name_dupes = reliability.find_duplicates_by_name()
+            result['by_name'] = name_dupes
+            result['name_duplicate_count'] = len(name_dupes)
+
+        return web.json_response(result)
+    except Exception as e:
+        logging.error(f"[WMD] Find duplicates error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/cleanup-recommendations")
+async def get_cleanup_recommendations(request):
+    """Get recommendations for which duplicate files to delete"""
+    try:
+        from . import reliability
+
+        duplicates = reliability.find_duplicates_by_hash()
+        recommendations = reliability.recommend_cleanup(duplicates)
+
+        total_space = sum(r['size'] for r in recommendations)
+
+        return web.json_response({
+            'success': True,
+            'recommendations': recommendations,
+            'count': len(recommendations),
+            'total_space': total_space,
+            'total_space_str': reliability.format_bytes(total_space)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Cleanup recommendations error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/pre-download-check")
+async def pre_download_check(request):
+    """Combined pre-download validation: check exists, disk space, etc."""
+    try:
+        from . import reliability
+
+        data = await request.json()
+        filename = data.get('filename')
+        directory = data.get('directory')
+        url = data.get('url')
+        size = data.get('size', 0)
+        force = data.get('force', False)
+
+        if not filename or not directory:
+            return web.json_response({'error': 'filename and directory required'}, status=400)
+
+        full_dir = os.path.join(folder_paths.models_dir, directory)
+
+        # Check if should skip (already exists)
+        should_skip, skip_reason = reliability.should_skip_download(filename, full_dir, force)
+
+        # Estimate size if not provided
+        if not size:
+            size = reliability.estimate_download_size(url, filename) or 0
+
+        # Check disk space
+        space_check = reliability.check_disk_space(full_dir, size) if size > 0 else None
+
+        result = {
+            'success': True,
+            'can_download': not should_skip and (space_check is None or space_check['has_space']),
+            'should_skip': should_skip,
+            'skip_reason': skip_reason,
+            'disk_space': space_check,
+            'estimated_size': size,
+            'estimated_size_str': reliability.format_bytes(size) if size else 'Unknown'
+        }
+
+        if should_skip:
+            result['message'] = skip_reason
+        elif space_check and not space_check['has_space']:
+            result['message'] = space_check['warning']
+        elif space_check and space_check['warning']:
+            result['warning'] = space_check['warning']
+
+        return web.json_response(result)
+    except Exception as e:
+        logging.error(f"[WMD] Pre-download check error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
 
@@ -5223,6 +5838,218 @@ async def set_parallel_downloads(request):
         })
     except Exception as e:
         logging.error(f"[WMD] Set parallel downloads error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# =============================================================================
+# ENHANCED DOWNLOAD QUEUE (Phase 3) - Pause/Resume & WebSocket Progress
+# =============================================================================
+
+@routes.post("/workflow-models/queue/add")
+async def enhanced_queue_add(request):
+    """Add download to enhanced queue with pause/resume support"""
+    try:
+        from . import download_queue as dq
+        from . import security
+
+        data = await request.json()
+        url = data.get('url')
+        filename = data.get('filename')
+        directory = data.get('directory')
+        priority = data.get('priority', 100)
+        expected_hash = data.get('hash', '')
+
+        if not all([url, filename, directory]):
+            return web.json_response({'error': 'Missing required fields'}, status=400)
+
+        # Validate URL
+        is_safe, warning = security.is_safe_url(url)
+        if not is_safe:
+            return web.json_response({'error': f'Unsafe URL: {warning}'}, status=400)
+
+        # Sanitize filename
+        filename = security.sanitize_filename(filename)
+
+        # Check if URL is CivitAI URN
+        if is_civitai_urn(url):
+            civitai_url = civitai_urn_to_download_url(url)
+            if civitai_url:
+                url = civitai_url
+            else:
+                return web.json_response({'error': 'Invalid CivitAI URN'}, status=400)
+
+        # Determine source
+        source = 'direct'
+        if 'huggingface.co' in url:
+            source = 'huggingface'
+        elif 'civitai.com' in url:
+            source = 'civitai'
+
+        # Add to queue
+        queue = dq.get_queue()
+        task = queue.add_task(
+            url=url,
+            filename=filename,
+            directory=directory,
+            source=source,
+            priority=priority,
+            expected_hash=expected_hash
+        )
+
+        return web.json_response({
+            'success': True,
+            'task_id': task.id,
+            'filename': task.filename,
+            'status': task.status,
+            'message': f'Added {filename} to queue'
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Enhanced queue add error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/queue/tasks")
+async def enhanced_queue_tasks(request):
+    """Get all tasks in enhanced queue"""
+    try:
+        from . import download_queue as dq
+
+        queue = dq.get_queue()
+        tasks = queue.get_all_tasks()
+
+        return web.json_response({
+            'success': True,
+            'tasks': [t.to_dict() for t in tasks],
+            'active_count': len(queue.get_active_tasks()),
+            'queued_count': len(queue.get_queued_tasks()),
+            'max_parallel': queue.max_parallel
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Enhanced queue tasks error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/queue/pause/{task_id}")
+async def enhanced_queue_pause(request):
+    """Pause a downloading task"""
+    try:
+        from . import download_queue as dq
+
+        task_id = request.match_info['task_id']
+        queue = dq.get_queue()
+
+        if queue.pause_task(task_id):
+            return web.json_response({
+                'success': True,
+                'message': 'Download paused'
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'error': 'Cannot pause task (not downloading)'
+            }, status=400)
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue pause error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/queue/resume/{task_id}")
+async def enhanced_queue_resume(request):
+    """Resume a paused task"""
+    try:
+        from . import download_queue as dq
+
+        task_id = request.match_info['task_id']
+        queue = dq.get_queue()
+
+        if queue.resume_task(task_id):
+            return web.json_response({
+                'success': True,
+                'message': 'Download resumed'
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'error': 'Cannot resume task (not paused)'
+            }, status=400)
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue resume error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/queue/cancel/{task_id}")
+async def enhanced_queue_cancel(request):
+    """Cancel a queued or downloading task"""
+    try:
+        from . import download_queue as dq
+
+        task_id = request.match_info['task_id']
+        queue = dq.get_queue()
+
+        if queue.cancel_task(task_id):
+            return web.json_response({
+                'success': True,
+                'message': 'Download cancelled'
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'error': 'Cannot cancel task'
+            }, status=400)
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue cancel error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/queue/task/{task_id}")
+async def enhanced_queue_task(request):
+    """Get a specific task status"""
+    try:
+        from . import download_queue as dq
+
+        task_id = request.match_info['task_id']
+        queue = dq.get_queue()
+        task = queue.get_task(task_id)
+
+        if task:
+            return web.json_response({
+                'success': True,
+                'task': task.to_dict(),
+                'speed_str': dq.format_speed(task.speed_bps) if task.speed_bps else '',
+                'eta_str': dq.format_eta(task.eta_seconds) if task.eta_seconds else ''
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'error': 'Task not found'
+            }, status=404)
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue task error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/queue/clear-completed")
+async def enhanced_queue_clear(request):
+    """Clear completed/failed/cancelled tasks"""
+    try:
+        from . import download_queue as dq
+
+        queue = dq.get_queue()
+        queue.clear_completed()
+
+        return web.json_response({
+            'success': True,
+            'message': 'Cleared completed tasks'
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Queue clear error: {e}")
         return web.json_response({'error': str(e)}, status=500)
 
 
