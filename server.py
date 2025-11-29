@@ -4,10 +4,12 @@ Server-side API endpoints for Workflow Models Downloader
 
 import os
 import re
+import glob
 import json
 import logging
 import asyncio
 import datetime
+import requests
 import threading
 import time
 import urllib.parse
@@ -70,7 +72,7 @@ def get_installed_version():
         logging.debug(f"[WMD] Looking for pyproject.toml at: {PYPROJECT_FILE}")
         if not os.path.exists(PYPROJECT_FILE):
             logging.warning(f"[WMD] pyproject.toml not found at: {PYPROJECT_FILE}")
-            return "1.8.3"  # Fallback to current version
+            return "1.8.1"  # Fallback to current version
 
         with open(PYPROJECT_FILE, 'r', encoding='utf-8') as f:
             content = f.read()
@@ -84,7 +86,7 @@ def get_installed_version():
                 logging.warning(f"[WMD] Could not find version in pyproject.toml")
     except Exception as e:
         logging.error(f"[WMD] Could not read version from pyproject.toml: {e}")
-    return "1.8.3"  # Fallback to current version
+    return "1.8.1"  # Fallback to current version
 
 def get_latest_version():
     """Get latest version from GitHub releases API"""
@@ -280,7 +282,6 @@ def get_tavily_cached_result(filename):
 def set_tavily_cached_result(filename, data):
     """Cache Tavily search result for a filename"""
     global _tavily_cache
-    import datetime
     data['cached_at'] = datetime.datetime.now().isoformat()
     _tavily_cache[filename] = data
     save_tavily_cache()
@@ -289,7 +290,6 @@ def set_tavily_cached_result(filename, data):
 def add_to_download_history(download_info):
     """Add a download entry to history"""
     global download_history
-    import datetime
 
     # Create history entry
     entry = {
@@ -419,7 +419,6 @@ def get_cached_metadata(filename):
 def save_search_metadata(filename, metadata):
     """Save search metadata for a filename to model_metadata.json"""
     basename = os.path.basename(filename)
-    import datetime
     metadata['cached_at'] = datetime.datetime.now().isoformat()
 
     # Update model_metadata.json
@@ -475,7 +474,6 @@ _model_metadata_cache = None
 
 def _cache_download_url(filename, url, source, hf_repo=None, hf_path=None, model_name=None, civitai_url=None):
     """Cache URL after successful download for future use"""
-    import datetime
     try:
         metadata = {
             'url': url,
@@ -710,8 +708,6 @@ def search_huggingface_api(filename):
         return _url_search_cache[cache_key]
 
     try:
-        import requests
-
         # Search for repos containing this filename
         filename_base = os.path.splitext(filename)[0]
         search_url = f"https://huggingface.co/api/models?search={urllib.parse.quote(filename_base)}&limit=5"
@@ -756,8 +752,6 @@ def search_civitai_api(filename):
         return _url_search_cache[cache_key]
 
     try:
-        import requests
-
         # Search by filename
         filename_base = os.path.splitext(filename)[0]
         # Remove common suffixes for better search
@@ -803,8 +797,6 @@ def search_tavily_api(filename):
         return None
 
     try:
-        import requests
-
         # Build search query focused on finding download URLs
         filename_base = os.path.splitext(filename)[0]
         # Clean up common suffixes for better search
@@ -1124,7 +1116,6 @@ def lookup_civitai_by_hash(file_hash):
         return None
 
     try:
-        import requests
         url = f"https://civitai.com/api/v1/model-versions/by-hash/{file_hash}"
         response = requests.get(url, timeout=15)
 
@@ -1863,7 +1854,6 @@ def extract_models_from_workflow(workflow_data):
 async def track_model_usage(request):
     """Track which models are used in the current workflow"""
     global used_models_tracking
-    import time
 
     try:
         data = await request.json()
@@ -1974,8 +1964,6 @@ async def get_unused_models(request):
 async def scan_all_workflows(request):
     """Scan all workflow files in a directory to build usage cache"""
     global used_models_tracking
-    import time
-    import glob
 
     try:
         data = await request.json()
@@ -2446,7 +2434,6 @@ async def fetch_download_url_from_page(url, filename):
 
                 # For HuggingFace tree pages, look for the file link
                 if 'huggingface.co' in url and '/tree/' in url:
-                    import re
                     # Look for links containing the filename
                     pattern = rf'href="([^"]*{re.escape(filename)}[^"]*)"'
                     matches = re.findall(pattern, html, re.IGNORECASE)
@@ -2457,7 +2444,6 @@ async def fetch_download_url_from_page(url, filename):
 
                 # For CivitAI model pages, try to find download link
                 if 'civitai.com' in url:
-                    import re
                     # Look for model version ID
                     version_match = re.search(r'modelVersionId[=:](\d+)', html)
                     if version_match:
@@ -2471,7 +2457,6 @@ async def fetch_download_url_from_page(url, filename):
 
                 # For GitHub releases, look for asset links
                 if 'github.com' in url and '/releases/' in url:
-                    import re
                     pattern = rf'href="([^"]*releases/download[^"]*{re.escape(filename)}[^"]*)"'
                     matches = re.findall(pattern, html, re.IGNORECASE)
                     if matches:
@@ -2605,7 +2590,6 @@ async def extract_source_from_results(request):
         if 'huggingface.co' in url:
             # https://huggingface.co/owner/repo/resolve/main/path/to/file.safetensors
             # https://huggingface.co/owner/repo/blob/main/path/to/file.safetensors
-            import re
             hf_match = re.search(r'huggingface\.co/([^/]+/[^/]+)(?:/(?:resolve|blob)/[^/]+)?(?:/(.+))?', url)
             if hf_match:
                 metadata['hf_repo'] = hf_match.group(1)
@@ -2621,7 +2605,6 @@ async def extract_source_from_results(request):
 
         # Parse CivitAI URLs
         elif 'civitai.com' in url:
-            import re
             civit_match = re.search(r'civitai\.com/models/(\d+)', url)
             if civit_match:
                 metadata['civitai_model_id'] = civit_match.group(1)
@@ -2668,7 +2651,6 @@ async def save_model_source(request):
 
         # Parse HuggingFace URLs
         if 'huggingface.co' in url:
-            import re
             hf_match = re.search(r'huggingface\.co/([^/]+/[^/]+)(?:/(?:resolve|blob)/[^/]+)?(?:/(.+))?', url)
             if hf_match:
                 metadata['hf_repo'] = hf_match.group(1)
@@ -2680,7 +2662,6 @@ async def save_model_source(request):
 
         # Parse CivitAI URLs
         elif 'civitai.com' in url:
-            import re
             civit_match = re.search(r'civitai\.com/models/(\d+)', url)
             if civit_match:
                 metadata['civitai_model_id'] = civit_match.group(1)
@@ -2993,7 +2974,6 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
     """Background thread to download a model"""
     try:
         from huggingface_hub import hf_hub_download
-        import requests
 
         # Normalize path separators for the OS
         target_dir_normalized = target_dir.replace('/', os.sep).replace('\\', os.sep)
@@ -3043,25 +3023,29 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
 
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
+        cancelled = False
 
         with open(dest_file, 'wb') as f:
             for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks for faster downloads
                 # Check for cancellation
                 if download_id in cancelled_downloads:
                     logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
-                    f.close()
-                    # Try to delete partial file
-                    try:
-                        os.remove(dest_file)
-                    except:
-                        pass
-                    cancelled_downloads.discard(download_id)
-                    return
+                    cancelled = True
+                    break
 
                 if chunk:
                     f.write(chunk)
                     downloaded += len(chunk)
                     progress_callback(downloaded, total_size)
+
+        # Handle cancellation after file is properly closed
+        if cancelled:
+            try:
+                os.remove(dest_file)
+            except OSError:
+                pass
+            cancelled_downloads.discard(download_id)
+            return
 
         with download_lock:
             download_progress[download_id]['status'] = 'completed'
@@ -3140,8 +3124,6 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
 def _download_from_url_thread(download_id, url, filename, target_dir):
     """Background thread to download a model from direct URL"""
     try:
-        import requests
-
         # Normalize path separators for the OS
         target_dir_normalized = target_dir.replace('/', os.sep).replace('\\', os.sep)
         target_path = os.path.join(folder_paths.models_dir, target_dir_normalized)
@@ -3184,6 +3166,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
 
         total_size = int(response.headers.get('content-length', 0))
         downloaded = 0
+        cancelled = False
 
         with download_lock:
             download_progress[download_id]['total_size'] = total_size
@@ -3193,14 +3176,8 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
                 # Check for cancellation
                 if download_id in cancelled_downloads:
                     logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
-                    f.close()
-                    # Try to delete partial file
-                    try:
-                        os.remove(dest_file)
-                    except:
-                        pass
-                    cancelled_downloads.discard(download_id)
-                    return
+                    cancelled = True
+                    break
 
                 if chunk:
                     f.write(chunk)
@@ -3209,6 +3186,15 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
                         download_progress[download_id]['downloaded'] = downloaded
                         if total_size > 0:
                             download_progress[download_id]['progress'] = int((downloaded / total_size) * 100)
+
+        # Handle cancellation after file is properly closed
+        if cancelled:
+            try:
+                os.remove(dest_file)
+            except OSError:
+                pass
+            cancelled_downloads.discard(download_id)
+            return
 
         with download_lock:
             download_progress[download_id]['status'] = 'completed'
@@ -3233,7 +3219,6 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
             entry['hf_path'] = hf_path
         if 'civitai.com' in url:
             # Try to extract model ID
-            import re
             match = re.search(r'/models/(\d+)', url)
             if match:
                 entry['civitai_model_id'] = match.group(1)
@@ -3852,7 +3837,6 @@ async def find_and_save_model_url(request):
                     entry['hf_path'] = hf_path
             elif 'civitai.com' in url:
                 entry['source'] = 'civitai'
-                import re
                 match = re.search(r'/models/(\d+)', url)
                 if match:
                     entry['civitai_model_id'] = match.group(1)
@@ -4170,7 +4154,6 @@ async def save_model_url(request):
         elif 'civitai.com' in url:
             entry['source'] = 'civitai'
             # Try to extract model ID from URL
-            import re
             match = re.search(r'/models/(\d+)', url)
             if match:
                 entry['civitai_model_id'] = match.group(1)
@@ -4196,7 +4179,6 @@ async def get_hf_readme(request):
             return web.json_response({'error': 'Valid HuggingFace URL required'}, status=400)
 
         # Extract repo from URL (e.g., https://huggingface.co/owner/repo/...)
-        import re
         match = re.search(r'huggingface\.co/([^/]+/[^/]+)', url)
         if not match:
             return web.json_response({'readme': None, 'error': 'Could not parse repo from URL'})
@@ -4647,8 +4629,6 @@ def guess_model_type_from_filename(filename, url_path=''):
 @routes.post("/workflow-models/analyze-url")
 async def analyze_url_endpoint(request):
     """Analyze a URL to determine filename, model type, and suggested directory"""
-    import requests
-
     try:
         data = await request.json()
         url = data.get('url', '').strip()
@@ -4861,7 +4841,6 @@ def _download_with_aria2(url, dest_path, download_id, headers=None):
 
             # Try to read progress (aria2c outputs progress to stderr)
             try:
-                import time
                 time.sleep(0.5)
 
                 # Check file size for progress
@@ -4894,7 +4873,6 @@ def _download_with_aria2(url, dest_path, download_id, headers=None):
 
 def _download_native_with_resume(url, dest_path, download_id, headers=None):
     """Download using requests with resume support (.partial file tracking)"""
-    import requests
     global active_download_count
 
     partial_path = dest_path + '.partial'
@@ -4989,7 +4967,6 @@ def start_download_queue_worker():
 def _download_queue_worker():
     """Background thread that processes download queue"""
     global download_queue_worker_running, active_download_count
-    import time
 
     while download_queue_worker_running:
         try:
