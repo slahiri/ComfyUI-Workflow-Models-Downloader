@@ -3016,7 +3016,13 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
 
         # Use requests for download with progress
         url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_path}"
-        dest_file = os.path.join(target_path, filename)
+        # Normalize filename path separators and create subdirectories if needed
+        filename_normalized = filename.replace('/', os.sep).replace('\\', os.sep)
+        dest_file = os.path.join(target_path, filename_normalized)
+        # Create parent directory if filename contains subdirectories
+        dest_dir = os.path.dirname(dest_file)
+        if dest_dir and not os.path.exists(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
 
         response = requests.get(url, stream=True, timeout=30, headers=headers)
         response.raise_for_status()
@@ -3139,7 +3145,13 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'downloading'
 
-        dest_file = os.path.join(target_path, filename)
+        # Normalize filename path separators and create subdirectories if needed
+        filename_normalized = filename.replace('/', os.sep).replace('\\', os.sep)
+        dest_file = os.path.join(target_path, filename_normalized)
+        # Create parent directory if filename contains subdirectories
+        dest_dir = os.path.dirname(dest_file)
+        if dest_dir and not os.path.exists(dest_dir):
+            os.makedirs(dest_dir, exist_ok=True)
 
         # Prepare headers based on URL source
         headers = {}
