@@ -7,7 +7,9 @@ import re
 import json
 import logging
 import asyncio
+import datetime
 import threading
+import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -3043,7 +3045,7 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
         downloaded = 0
 
         with open(dest_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks for faster downloads
                 # Check for cancellation
                 if download_id in cancelled_downloads:
                     logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
@@ -3187,7 +3189,7 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
             download_progress[download_id]['total_size'] = total_size
 
         with open(dest_file, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks for faster downloads
                 # Check for cancellation
                 if download_id in cancelled_downloads:
                     logging.info(f"[Workflow-Models-Downloader] Download cancelled: {filename}")
@@ -4932,7 +4934,7 @@ def _download_native_with_resume(url, dest_path, download_id, headers=None):
         downloaded = resume_byte
 
         with open(partial_path, mode) as f:
-            for chunk in response.iter_content(chunk_size=8192):
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks for faster downloads
                 # Check for cancellation
                 if download_id in cancelled_downloads:
                     return False, "Cancelled"
