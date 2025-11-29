@@ -26,6 +26,19 @@ search_cache.json        # DEPRECATED - merged into model_metadata.json
 user_model_urls.json     # DEPRECATED - merged into model_metadata.json
 usage_cache.json         # DEPRECATED - feature removed
 
+# Cache files
+tavily_cache.json        # Tavily search cache
+download_queue.json      # Persistent download queue
+
+# SQLite database files
+wmd_data.db              # Main SQLite database
+wmd_data.db-shm          # SQLite shared memory
+wmd_data.db-wal          # SQLite write-ahead log
+*.db.bak                 # Database backups
+
+# JSON backup files (after SQLite migration)
+*.json.bak
+
 node.zip
 
 # Log files
