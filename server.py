@@ -115,7 +115,7 @@ def compare_versions(installed, latest):
         while len(latest_parts) < len(installed_parts):
             latest_parts.append(0)
         return latest_parts > installed_parts
-    except:
+    except Exception:
         return False
 
 # Search metadata cache file
@@ -733,7 +733,7 @@ def search_huggingface_api(filename):
                                 _url_search_cache[cache_key] = url
                                 logging.info(f"[Workflow-Models-Downloader] Found {filename} on HuggingFace: {repo_id}")
                                 return url
-                except:
+                except Exception:
                     continue
 
     except Exception as e:
@@ -855,7 +855,7 @@ def search_tavily_api(filename):
                                                 }
                                                 logging.info(f"[Workflow-Models-Downloader] Tavily found {filename} on HuggingFace: {repo}")
                                                 return _url_search_cache[cache_key]
-                            except:
+                            except Exception:
                                 pass
 
                 elif 'civitai.com' in result_url:
@@ -887,7 +887,7 @@ def search_tavily_api(filename):
                                                 }
                                                 logging.info(f"[Workflow-Models-Downloader] Tavily found {filename} on CivitAI")
                                                 return _url_search_cache[cache_key]
-                        except:
+                        except Exception:
                             pass
 
             # If no direct match found, return the most relevant result info
@@ -1166,7 +1166,7 @@ def find_model_file_path(target_dir, filename):
         # Get all configured paths for this folder type (includes extra_model_paths.yaml)
         try:
             all_paths = folder_paths.get_folder_paths(check_dir)
-        except:
+        except Exception:
             # Fallback to default models_dir if folder type not found
             all_paths = [os.path.join(folder_paths.models_dir, check_dir)]
 
@@ -1283,7 +1283,7 @@ def find_model_alternatives(filename, target_dir):
                                     size_str = f"{size_mb/1024:.2f} GB"
                                 else:
                                     size_str = f"{size_mb:.1f} MB"
-                            except:
+                            except Exception:
                                 pass
 
                         # Determine format type
@@ -1376,7 +1376,7 @@ def check_model_exists(target_dir, filename):
                                 return True, f"{size_mb/1024:.2f} GB"
                             else:
                                 return True, f"{size_mb:.1f} MB"
-                        except:
+                        except Exception:
                             return True, None
         except Exception as e:
             # Fallback: folder type might not exist in ComfyUI
@@ -1408,7 +1408,7 @@ def scan_workflow_for_models(workflow_json):
     if isinstance(workflow_json, str):
         try:
             workflow_data = json.loads(workflow_json)
-        except:
+        except Exception:
             workflow_data = {}
         content = workflow_json
     else:
@@ -1490,7 +1490,7 @@ def scan_workflow_for_models(workflow_json):
                 # Decode URL-encoded characters (%2D -> -, %20 -> space, etc.)
                 try:
                     decoded = urllib.parse.unquote(cleaned)
-                except:
+                except Exception:
                     decoded = cleaned
 
                 model_files.add(decoded)
@@ -1720,7 +1720,7 @@ async def get_available_directories(request):
                         'paths': paths,
                         'has_extra_paths': len(paths) > 1
                     })
-            except:
+            except Exception:
                 # Folder type not registered, skip
                 pass
 
@@ -1913,7 +1913,7 @@ async def get_unused_models(request):
                             else:
                                 size_str = f"{size_mb:.1f} MB"
                             modified_time = stat.st_mtime
-                        except:
+                        except Exception:
                             pass
 
                     # Check if model was used (handle both old and new format)
@@ -1941,7 +1941,7 @@ async def get_unused_models(request):
                         'is_used': is_used,
                         'workflows': workflows
                     })
-            except:
+            except Exception:
                 pass
 
         # Sort by unused first, then by size (largest first)
@@ -2215,7 +2215,7 @@ async def parse_workflow(request):
 
         try:
             workflow_data = json.loads(workflow_content)
-        except:
+        except Exception:
             return web.json_response({'error': 'Invalid JSON in workflow file'}, status=400)
 
         logging.debug(f"[WMD] Parsing workflow: {workflow_path}")
@@ -3003,7 +3003,7 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
             total_size = int(response.headers.get('content-length', 0))
             with download_lock:
                 download_progress[download_id]['total_size'] = total_size
-        except:
+        except Exception:
             total_size = 0
 
         # Download with progress callback
@@ -3587,7 +3587,7 @@ async def scan_node_metadata(request):
                     repo_name = github_url.rstrip('/').split('/')[-1]
                     custom_nodes_path = os.path.join(folder_paths.base_path, 'custom_nodes', repo_name)
                     entry['installed'] = os.path.exists(custom_nodes_path)
-                except:
+                except Exception:
                     pass
 
                 # Update source if this is new info
@@ -4318,7 +4318,7 @@ async def get_model_metadata(request):
                         if os.path.abspath(path).startswith(os.path.abspath(base_path)):
                             valid_path = True
                             break
-                except:
+                except Exception:
                     pass
                 if valid_path:
                     break
@@ -4337,7 +4337,7 @@ async def get_model_metadata(request):
                     if path.startswith(base_path):
                         model_type = folder_type
                         break
-            except:
+            except Exception:
                 pass
 
         metadata = {
@@ -4381,7 +4381,7 @@ async def delete_model(request):
                         if os.path.abspath(path).startswith(os.path.abspath(base_path)):
                             valid_path = True
                             break
-                except:
+                except Exception:
                     pass
                 if valid_path:
                     break
@@ -4830,7 +4830,7 @@ def _download_with_aria2(url, dest_path, download_id, headers=None):
                 process.terminate()
                 try:
                     process.wait(timeout=5)
-                except:
+                except Exception:
                     process.kill()
                 return False, "Cancelled"
 
@@ -4851,7 +4851,7 @@ def _download_with_aria2(url, dest_path, download_id, headers=None):
                         total = download_progress[download_id].get('total_size', 0)
                         if total > 0:
                             download_progress[download_id]['progress'] = int((current_size / total) * 100)
-            except:
+            except Exception:
                 pass
 
         # Check result
