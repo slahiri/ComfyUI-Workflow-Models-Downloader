@@ -16,7 +16,21 @@ Thumbs.db
 # Settings file containing API keys
 settings.json
 
-# Search cache file
-search_cache.json
-usage_cache.json
+# Data files (2 master databases + 1 history)
+model_metadata.json      # Master 1: Single source of truth for models
+node_metadata.json       # Master 2: Single source of truth for nodes
+download_history.json    # Download history for UI
+
+# Deprecated data files (kept for backwards compatibility)
+search_cache.json        # DEPRECATED - merged into model_metadata.json
+user_model_urls.json     # DEPRECATED - merged into model_metadata.json
+usage_cache.json         # DEPRECATED - feature removed
+
 node.zip
+
+# Log files
+wmd.log
+wmd.log.*
+
+venv/
+.venv/

@@ -2,7 +2,7 @@ import { api } from "../../scripts/api.js";
 import { app } from "../../scripts/app.js";
 import { $el } from "../../scripts/ui.js";
 
-const VERSION = "1.8.0";
+const VERSION = "1.8.3";
 
 // Common model directories in ComfyUI
 const MODEL_DIRECTORIES = [
@@ -204,12 +204,14 @@ const styles = `
 }
 
 .wmd-btn-secondary {
-    background-color: #555;
-    color: white;
+    background-color: #3a3a3a;
+    color: #ccc;
+    border: 1px solid #555;
 }
 
 .wmd-btn-secondary:hover {
-    background-color: #666;
+    background-color: #4a4a4a;
+    color: #fff;
 }
 
 .wmd-btn-warning {
@@ -586,6 +588,53 @@ const styles = `
 .wmd-filename-cell {
     max-width: 300px;
     word-break: break-all;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.wmd-filename-wrapper {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wmd-filename-icons {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.wmd-filename-link {
+    color: #58a6ff;
+    text-decoration: none;
+    font-weight: bold;
+}
+
+.wmd-filename-link:hover {
+    text-decoration: underline;
+}
+
+.wmd-filename-text {
+    font-weight: bold;
+}
+
+.wmd-copy-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    font-size: 12px;
+    opacity: 0.5;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.wmd-copy-btn:hover {
+    opacity: 1;
 }
 
 .wmd-settings-btn {
@@ -1300,6 +1349,458 @@ const styles = `
     min-width: 0;
 }
 
+/* Workflows Tab - Three Column Layout */
+.wmd-workflows-layout {
+    display: flex;
+    gap: 12px;
+    height: 100%;
+    overflow: hidden;
+}
+
+.wmd-workflows-column {
+    display: flex;
+    flex-direction: column;
+    background-color: #252525;
+    border-radius: 6px;
+    overflow: hidden;
+}
+
+.wmd-workflows-column.workflows-list {
+    width: 280px;
+    min-width: 220px;
+    flex-shrink: 0;
+}
+
+.wmd-workflows-column.models-list {
+    width: 300px;
+    min-width: 250px;
+    flex-shrink: 0;
+}
+
+.wmd-workflows-column.model-details {
+    flex: 1;
+    min-width: 300px;
+}
+
+.wmd-workflows-column-header {
+    padding: 12px 14px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #2a2a2a;
+}
+
+.wmd-workflows-column-header .count {
+    font-size: 11px;
+    color: #666;
+    background-color: #333;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: normal;
+}
+
+.wmd-refresh-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.wmd-refresh-btn:hover {
+    opacity: 1;
+    background-color: #333;
+}
+
+.wmd-workflows-column-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+}
+
+.wmd-workflow-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    color: #ccc;
+    font-size: 13px;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+}
+
+.wmd-workflow-item:hover {
+    background-color: #333;
+    color: #fff;
+}
+
+.wmd-workflow-item.active {
+    background-color: #2a3a4a;
+    color: #58a6ff;
+    border-left-color: #58a6ff;
+}
+
+.wmd-workflow-item-icon {
+    font-size: 14px;
+}
+
+.wmd-workflow-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.wmd-workflow-item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-weight: 500;
+}
+
+.wmd-workflow-item-path {
+    font-size: 10px;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+}
+
+.wmd-model-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    color: #ccc;
+    font-size: 13px;
+    transition: all 0.15s;
+    border-left: 2px solid transparent;
+}
+
+.wmd-model-item:hover {
+    background-color: #333;
+}
+
+.wmd-model-item.active {
+    background-color: #2a3a2a;
+    color: #4CAF50;
+    border-left-color: #4CAF50;
+}
+
+.wmd-model-item.missing {
+    color: #f87171;
+}
+
+.wmd-model-item.missing.active {
+    background-color: #3a2a2a;
+    border-left-color: #f87171;
+}
+
+.wmd-model-item-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.wmd-model-item-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.wmd-model-item-type {
+    font-size: 10px;
+    color: #888;
+    margin-top: 2px;
+}
+
+.wmd-model-item-status {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.wmd-model-item-status.exists {
+    background-color: #1a3a1a;
+    color: #4CAF50;
+}
+
+.wmd-model-item-status.missing {
+    background-color: #3a1a1a;
+    color: #f87171;
+}
+
+.wmd-user-url-badge {
+    font-size: 9px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    background-color: #3a3a1a;
+    color: #d4a017;
+    margin-left: 4px;
+    font-weight: normal;
+}
+
+.wmd-readme-content {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #aaa;
+}
+
+.wmd-readme-content h2, .wmd-readme-content h3, .wmd-readme-content h4 {
+    color: #ccc;
+    margin: 12px 0 8px 0;
+}
+
+.wmd-readme-content h2 { font-size: 16px; }
+.wmd-readme-content h3 { font-size: 14px; }
+.wmd-readme-content h4 { font-size: 13px; }
+
+.wmd-readme-content p {
+    margin: 8px 0;
+}
+
+.wmd-readme-content a {
+    color: #4a9eff;
+}
+
+.wmd-readme-content strong {
+    color: #ccc;
+}
+
+.wmd-loading-small {
+    color: #666;
+    font-size: 12px;
+    padding: 10px;
+}
+
+.wmd-model-details-content {
+    padding: 16px;
+    overflow-y: auto;
+    height: 100%;
+}
+
+.wmd-model-details-section {
+    margin-bottom: 20px;
+}
+
+.wmd-model-details-section-title {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+}
+
+.wmd-model-details-row {
+    display: flex;
+    margin-bottom: 10px;
+    font-size: 13px;
+}
+
+.wmd-model-details-label {
+    width: 100px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+.wmd-model-details-value {
+    flex: 1;
+    color: #ddd;
+    word-break: break-all;
+}
+
+.wmd-model-details-value a {
+    color: #58a6ff;
+    text-decoration: none;
+}
+
+.wmd-model-details-value a:hover {
+    text-decoration: underline;
+}
+
+.wmd-alternatives-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.wmd-alternative-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background-color: #2a2a2a;
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.wmd-alternative-item-name {
+    flex: 1;
+    color: #ccc;
+    word-break: break-all;
+}
+
+.wmd-alternative-item-size {
+    color: #888;
+    font-size: 11px;
+    margin-left: 8px;
+}
+
+.wmd-workflows-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #666;
+}
+
+.wmd-workflows-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid #333;
+}
+
+.wmd-workflows-search input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background-color: #1a1a1a;
+    color: #fff;
+    font-size: 12px;
+}
+
+.wmd-workflows-search input:focus {
+    outline: none;
+    border-color: #58a6ff;
+}
+
+/* Directory Management */
+.wmd-dir-manager {
+    background: #1e1e1e;
+    border-bottom: 1px solid #333;
+    padding: 12px 16px;
+}
+
+.wmd-dir-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.wmd-dir-manager-title {
+    font-size: 12px;
+    color: #888;
+    font-weight: 500;
+}
+
+.wmd-dir-manager-toggle {
+    background: none;
+    border: none;
+    color: #58a6ff;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 4px 8px;
+}
+
+.wmd-dir-manager-toggle:hover {
+    text-decoration: underline;
+}
+
+.wmd-dir-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.wmd-dir-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: #252525;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.wmd-dir-item-path {
+    flex: 1;
+    color: #ccc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.wmd-dir-item-default {
+    color: #888;
+    font-size: 10px;
+    background: #333;
+    padding: 2px 6px;
+    border-radius: 3px;
+}
+
+.wmd-dir-item-remove {
+    background: none;
+    border: none;
+    color: #f87171;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    opacity: 0.7;
+}
+
+.wmd-dir-item-remove:hover {
+    opacity: 1;
+}
+
+.wmd-dir-add {
+    display: flex;
+    gap: 8px;
+}
+
+.wmd-dir-add input {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background-color: #1a1a1a;
+    color: #fff;
+    font-size: 12px;
+}
+
+.wmd-dir-add input:focus {
+    outline: none;
+    border-color: #58a6ff;
+}
+
+.wmd-dir-add-btn {
+    background: #2563eb;
+    border: none;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.wmd-dir-add-btn:hover {
+    background: #1d4ed8;
+}
+
 /* Confidence Badge */
 .wmd-confidence-badge {
     display: inline-block;
@@ -1418,15 +1919,15 @@ class WorkflowModelsDownloader {
         this.installedModels = []; // For browser tab
         this.browserFilter = ""; // Search filter for browser
         this.browserType = ""; // Type filter for browser
-        this.browserSort = "name"; // Sort option for browser
-        this.browserShowUnused = false; // Show only unused models
-        this.unusedModels = new Set(); // Set of unused model filenames
-        this.trackedModelCount = 0; // Number of models in usage cache
+        this.selectedBrowserModel = null; // Selected model in browser
+        this.selectedModelInfo = null; // URL info for selected model
+        this.selectedModelReadme = null; // README for selected model
         this.availableDirectories = []; // Fetched from backend
         this.downloadQueue = []; // Queued downloads
         this.downloadHistory = []; // Download history
         this.activeDownloadCount = 0; // Track active downloads for badge
         this.rawDownloadInfo = null; // For raw URL downloads
+        this.searchCache = {}; // Cache for advanced search results
     }
 
     async show() {
@@ -1569,6 +2070,10 @@ class WorkflowModelsDownloader {
                         id: "wmd-tab-browser"
                     }, ["Local Browser"]),
                     $el("button.wmd-tab", {
+                        onclick: () => this.selectTab('workflows'),
+                        id: "wmd-tab-workflows"
+                    }, ["Workflows"]),
+                    $el("button.wmd-tab", {
                         onclick: () => this.selectTab('help'),
                         id: "wmd-tab-help"
                     }, ["Help"])
@@ -1594,6 +2099,13 @@ class WorkflowModelsDownloader {
                         $el("div.wmd-loading", [
                             $el("div.wmd-spinner"),
                             $el("div", ["Loading installed models..."])
+                        ])
+                    ]),
+                    // Workflows tab content
+                    $el("div.wmd-tab-content", { id: "wmd-content-workflows" }, [
+                        $el("div.wmd-loading", [
+                            $el("div.wmd-spinner"),
+                            $el("div", ["Loading workflows..."])
                         ])
                     ]),
                     // Help tab content
@@ -1636,6 +2148,7 @@ class WorkflowModelsDownloader {
         // Load tab-specific content
         if (tabName === 'downloads') this.loadDownloadsTab();
         if (tabName === 'browser') this.loadBrowserTab();
+        if (tabName === 'workflows') this.loadWorkflowsTab();
         if (tabName === 'help') this.loadHelpTab();
 
         // Update footer based on tab
@@ -1845,13 +2358,16 @@ class WorkflowModelsDownloader {
             // Source badge
             const sourceBadge = this.getSourceBadge(model);
 
+            // Build info icons for filename cell
+            const infoIcon = this.buildMetadataInfoIcon(model);
+            const suggestionsIcon = this.buildSuggestionsInfoIcon(model);
+
             // Action cell
             let actionCell = "";
             if (model.url) {
                 // Has URL - show download button
                 const btnClass = model.exists ? "wmd-btn-warning" : "wmd-btn-primary";
                 const btnText = model.exists ? "Re-download" : "Download";
-                const infoIcon = this.buildMetadataInfoIcon(model);
                 actionCell = `
                     <div class="wmd-action-cell">
                         <div class="wmd-action-buttons">
@@ -1860,7 +2376,6 @@ class WorkflowModelsDownloader {
                                     onclick="window.wmdInstance.downloadModel(${index})">
                                 ${btnText}
                             </button>
-                            ${infoIcon}
                         </div>
                         <div id="wmd-progress-${index}" style="display:none;">
                             <div style="display: flex; align-items: center; gap: 8px;">
@@ -1894,9 +2409,6 @@ class WorkflowModelsDownloader {
                 const searchBtnClass = advancedSearchEnabled ? 'wmd-btn-warning' : 'wmd-btn-info';
                 const searchBtnHandler = advancedSearchEnabled ? 'advancedSearch' : 'searchUrl';
 
-                // Show info icon if there's cached suggestions
-                const suggestionsIcon = this.buildSuggestionsInfoIcon(model);
-
                 actionCell = `
                     <div class="wmd-action-cell">
                         <div class="wmd-action-buttons">
@@ -1912,7 +2424,6 @@ class WorkflowModelsDownloader {
                                 ${searchBtnText}
                             </button>
                             ${hashLookupBtn}
-                            ${suggestionsIcon}
                         </div>
                         <div class="wmd-url-input-row" id="wmd-url-row-${index}">
                             <input type="text" class="wmd-url-input"
@@ -1945,9 +2456,27 @@ class WorkflowModelsDownloader {
                 ? `<a href="https://huggingface.co/${model.hf_repo}" target="_blank" class="wmd-hf-link">${model.hf_repo}</a>${sourceBadge}`
                 : (model.url ? `<span style="color:#888;">Direct URL</span>${sourceBadge}` : `<span style="color:#666;">No URL</span>`);
 
+            // Determine homepage URL for the filename link
+            let homepageUrl = null;
+            if (model.hf_repo) {
+                homepageUrl = `https://huggingface.co/${model.hf_repo}`;
+            } else if (model.civitai_url) {
+                homepageUrl = model.civitai_url;
+            }
+
+            const filenameHtml = homepageUrl
+                ? `<a href="${homepageUrl}" target="_blank" class="wmd-filename-link" title="Open model page">${model.filename}</a>`
+                : `<span class="wmd-filename-text">${model.filename}</span>`;
+
             return `
                 <tr id="wmd-row-${index}">
-                    <td class="wmd-filename-cell"><strong>${model.filename}</strong></td>
+                    <td class="wmd-filename-cell">
+                        <span class="wmd-filename-wrapper">${filenameHtml}</span>
+                        <span class="wmd-filename-icons" id="wmd-filename-icons-${index}">
+                            <button class="wmd-copy-btn" onclick="window.wmdInstance.copyModelMetadata(${index})" title="Copy model info">📋</button>
+                            ${infoIcon}${suggestionsIcon}
+                        </span>
+                    </td>
                     <td><span class="wmd-type-badge">${model.type}</span></td>
                     <td>${dirDropdown}</td>
                     <td class="${statusClass}" id="wmd-status-cell-${index}">${statusText} ${alternativesBadge}</td>
@@ -2279,11 +2808,11 @@ class WorkflowModelsDownloader {
     }
 
     addSuggestionsInfoIcon(index, suggestions) {
-        const actionButtons = document.querySelector(`#wmd-row-${index} .wmd-action-buttons`);
-        if (!actionButtons) return;
+        const filenameIcons = document.getElementById(`wmd-filename-icons-${index}`);
+        if (!filenameIcons) return;
 
-        // Remove existing info icon if any
-        const existingIcon = actionButtons.querySelector('.wmd-info-icon');
+        // Remove existing suggestions icon if any
+        const existingIcon = filenameIcons.querySelector('.wmd-info-icon');
         if (existingIcon) existingIcon.remove();
 
         // Build suggestions tooltip content
@@ -2306,7 +2835,7 @@ class WorkflowModelsDownloader {
             ${tooltipContent}
         </div>`;
 
-        actionButtons.appendChild(infoIcon);
+        filenameIcons.appendChild(infoIcon);
     }
 
     async lookupHash(index) {
@@ -2410,6 +2939,21 @@ class WorkflowModelsDownloader {
         const row = document.getElementById(`wmd-row-${index}`);
         if (!row || !model.url) return;
 
+        // Update filename to be a link if homepage URL is available
+        const filenameWrapper = row.querySelector('.wmd-filename-wrapper');
+        if (filenameWrapper) {
+            let homepageUrl = null;
+            if (model.hf_repo) {
+                homepageUrl = `https://huggingface.co/${model.hf_repo}`;
+            } else if (model.civitai_url) {
+                homepageUrl = model.civitai_url;
+            }
+
+            if (homepageUrl) {
+                filenameWrapper.innerHTML = `<a href="${homepageUrl}" target="_blank" class="wmd-filename-link" title="Open model page">${model.filename}</a>`;
+            }
+        }
+
         // Update source column
         const sourceCell = row.cells[4];
         const sourceBadge = this.getSourceBadge(model);
@@ -2419,8 +2963,15 @@ class WorkflowModelsDownloader {
             sourceCell.innerHTML = `<span style="color:#888;">Direct URL</span>${sourceBadge}`;
         }
 
-        // Build info icon if metadata exists
+        // Build info icon if metadata exists and update filename icons
         const infoIcon = this.buildMetadataInfoIcon(model);
+        const filenameIcons = document.getElementById(`wmd-filename-icons-${index}`);
+        if (filenameIcons) {
+            filenameIcons.innerHTML = `
+                <button class="wmd-copy-btn" onclick="window.wmdInstance.copyModelMetadata(${index})" title="Copy model info">📋</button>
+                ${infoIcon}
+            `;
+        }
 
         // Update action column with download button
         const actionCell = row.cells[5];
@@ -2434,7 +2985,6 @@ class WorkflowModelsDownloader {
                             onclick="window.wmdInstance.downloadModel(${index})">
                         ${btnText}
                     </button>
-                    ${infoIcon}
                 </div>
                 <div id="wmd-progress-${index}" style="display:none;">
                     <div style="display: flex; align-items: center; gap: 8px;">
@@ -2988,29 +3538,43 @@ class WorkflowModelsDownloader {
         if (!content) return;
 
         try {
-            const response = await api.fetchApi("/workflow-models/progress");
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            const allProgress = await response.json();
+            // Fetch both current progress and persistent history
+            const [progressResponse, historyResponse] = await Promise.all([
+                api.fetchApi("/workflow-models/progress"),
+                api.fetchApi("/workflow-models/download-history")
+            ]);
 
-            // Separate active and completed downloads
+            if (!progressResponse.ok) {
+                throw new Error(`HTTP ${progressResponse.status}: ${progressResponse.statusText}`);
+            }
+
+            const allProgress = await progressResponse.json();
+            const historyData = historyResponse.ok ? await historyResponse.json() : { history: [] };
+            const history = historyData.history || [];
+
+            // Separate active downloads from current progress
             const active = [];
-            const completed = [];
-            const failed = [];
+            const activeFilenames = new Set();
 
             for (const [id, progress] of Object.entries(allProgress)) {
                 if (progress.status === 'downloading' || progress.status === 'starting') {
                     active.push({ id, ...progress });
-                } else if (progress.status === 'completed') {
-                    completed.push({ id, ...progress });
-                } else if (progress.status === 'error' || progress.status === 'cancelled') {
-                    failed.push({ id, ...progress });
+                    activeFilenames.add(progress.filename);
                 }
             }
 
+            // Get completed and failed from history (excluding currently active ones)
+            const completed = history
+                .filter(h => h.status === 'completed' && !activeFilenames.has(h.filename))
+                .map(h => ({ ...h, id: h.id || h.filename }));
+            const failed = history
+                .filter(h => h.status === 'error' && !activeFilenames.has(h.filename))
+                .map(h => ({ ...h, id: h.id || h.filename }));
+
             // Update badge
             this.updateDownloadsBadge(active.length);
+
+            const hasHistory = completed.length > 0 || failed.length > 0;
 
             content.innerHTML = `
                 <!-- Raw Download Section -->
@@ -3043,7 +3607,13 @@ class WorkflowModelsDownloader {
                             <span>Failed</span>
                         </div>
                     </div>
-                    <div>
+                    <div style="display: flex; gap: 8px;">
+                        ${hasHistory ? `
+                            <button class="wmd-btn wmd-btn-danger wmd-btn-small"
+                                    onclick="window.wmdInstance.clearDownloadHistory()">
+                                Clear History
+                            </button>
+                        ` : ''}
                         <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
                                 onclick="window.wmdInstance.loadDownloadsTab()">
                             Refresh
@@ -3060,14 +3630,14 @@ class WorkflowModelsDownloader {
 
                 ${completed.length > 0 ? `
                     <div class="wmd-downloads-section">
-                        <div class="wmd-downloads-section-title">Recently Completed</div>
+                        <div class="wmd-downloads-section-title">Completed (${completed.length})</div>
                         ${completed.map(d => this.renderDownloadItem(d, 'completed')).join('')}
                     </div>
                 ` : ''}
 
                 ${failed.length > 0 ? `
                     <div class="wmd-downloads-section">
-                        <div class="wmd-downloads-section-title">Failed / Cancelled</div>
+                        <div class="wmd-downloads-section-title">Failed (${failed.length})</div>
                         ${failed.map(d => this.renderDownloadItem(d, 'failed')).join('')}
                     </div>
                 ` : ''}
@@ -3102,6 +3672,28 @@ class WorkflowModelsDownloader {
         }
     }
 
+    async clearDownloadHistory() {
+        if (!confirm('Clear all download history? This cannot be undone.')) {
+            return;
+        }
+
+        try {
+            const response = await api.fetchApi("/workflow-models/clear-download-history", {
+                method: "POST"
+            });
+
+            if (response.ok) {
+                this.showNotification('Download history cleared', 'success');
+                this.loadDownloadsTab();
+            } else {
+                this.showNotification('Failed to clear history', 'error');
+            }
+        } catch (error) {
+            console.error("[WMD] Error clearing history:", error);
+            this.showNotification('Error clearing history', 'error');
+        }
+    }
+
     formatBytes(bytes) {
         if (bytes === 0) return '0 B';
         const k = 1024;
@@ -3113,40 +3705,91 @@ class WorkflowModelsDownloader {
     renderDownloadItem(download, status) {
         const progressPercent = download.progress || 0;
         const sizeInfo = download.total_size > 0
-            ? `${this.formatBytes(download.downloaded || 0)} / ${this.formatBytes(download.total_size)}`
-            : 'Calculating...';
+            ? this.formatBytes(download.total_size)
+            : '';
 
         let statusBadge = '';
         let actionBtn = '';
+        let timeInfo = '';
+
+        // Format timestamp if available (from history)
+        if (download.timestamp) {
+            const date = new Date(download.timestamp);
+            timeInfo = date.toLocaleString();
+        }
 
         if (status === 'active') {
+            const activeSize = download.total_size > 0
+                ? `${this.formatBytes(download.downloaded || 0)} / ${this.formatBytes(download.total_size)}`
+                : 'Calculating...';
             statusBadge = `<span style="color: #2196F3;">Downloading... ${progressPercent}%</span>`;
             actionBtn = `<button class="wmd-btn wmd-btn-danger wmd-btn-small"
                                  onclick="window.wmdInstance.cancelDownloadById('${download.id}')">Cancel</button>`;
-        } else if (status === 'completed') {
-            statusBadge = `<span style="color: #4CAF50;">Completed</span>`;
-        } else if (status === 'failed') {
-            statusBadge = `<span style="color: #f44336;">${download.error || 'Failed'}</span>`;
-        }
-
-        return `
-            <div class="wmd-download-item">
-                <div class="wmd-download-item-info">
-                    <div class="wmd-download-item-name">${download.filename || download.id}</div>
-                    <div class="wmd-download-item-meta">${sizeInfo} ${statusBadge}</div>
-                </div>
-                ${status === 'active' ? `
+            return `
+                <div class="wmd-download-item">
+                    <div class="wmd-download-item-info">
+                        <div class="wmd-download-item-name">${download.filename || download.id}</div>
+                        <div class="wmd-download-item-meta">${activeSize} ${statusBadge}</div>
+                    </div>
                     <div class="wmd-download-item-progress">
                         <div class="wmd-progress-bar">
                             <div class="wmd-progress-fill" style="width: ${progressPercent}%"></div>
                         </div>
                     </div>
-                ` : ''}
+                    <div class="wmd-download-item-actions">
+                        ${actionBtn}
+                    </div>
+                </div>
+            `;
+        } else if (status === 'completed') {
+            statusBadge = `<span style="color: #4CAF50;">✓ Completed</span>`;
+            actionBtn = `
+                <button class="wmd-copy-btn" onclick="window.wmdInstance.copyDownloadInfo('${download.filename}', 'completed')" title="Copy info">📋</button>
+                <button class="wmd-btn wmd-btn-secondary wmd-btn-small" style="padding: 4px 8px; font-size: 11px;"
+                         onclick="window.wmdInstance.deleteHistoryItem('${download.filename}')">Remove</button>`;
+        } else if (status === 'failed') {
+            const escapedError = (download.error || 'Failed').replace(/'/g, "\\'").replace(/"/g, '\\"');
+            statusBadge = `<span style="color: #f44336;">✗ ${download.error || 'Failed'}</span>
+                <button class="wmd-copy-btn" onclick="window.wmdInstance.copyError('${escapedError}')" title="Copy error">📋</button>`;
+            actionBtn = `
+                <button class="wmd-btn wmd-btn-secondary wmd-btn-small" style="padding: 4px 8px; font-size: 11px;"
+                         onclick="window.wmdInstance.deleteHistoryItem('${download.filename}')">Remove</button>`;
+        }
+
+        return `
+            <div class="wmd-download-item">
+                <div class="wmd-download-item-info">
+                    <div class="wmd-download-item-name">
+                        ${download.filename || download.id}
+                        <button class="wmd-copy-btn" onclick="window.wmdInstance.copyDownloadInfo('${download.filename}', '${status}', '${(download.error || '').replace(/'/g, "\\'")}')" title="Copy info">📋</button>
+                    </div>
+                    <div class="wmd-download-item-meta">
+                        ${sizeInfo ? `<span style="color: #888;">${sizeInfo}</span>` : ''}
+                        ${timeInfo ? `<span style="color: #666; margin-left: 8px;">${timeInfo}</span>` : ''}
+                        <span style="margin-left: 8px;">${statusBadge}</span>
+                    </div>
+                </div>
                 <div class="wmd-download-item-actions">
                     ${actionBtn}
                 </div>
             </div>
         `;
+    }
+
+    async deleteHistoryItem(filename) {
+        try {
+            const response = await api.fetchApi("/workflow-models/delete-history-item", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ filename })
+            });
+
+            if (response.ok) {
+                this.loadDownloadsTab();
+            }
+        } catch (error) {
+            console.error("[WMD] Error deleting history item:", error);
+        }
     }
 
     async cancelDownloadById(downloadId) {
@@ -3313,26 +3956,36 @@ class WorkflowModelsDownloader {
         const content = document.getElementById("wmd-content-browser");
         if (!content) return;
 
+        // Initialize state
+        this.installedModels = [];
+        this.selectedBrowserModel = null;
+        this.selectedModelReadme = null;
+        this.browserFilter = this.browserFilter || '';
+        this.browserType = this.browserType || '';
+
         content.innerHTML = `
             <div class="wmd-loading">
                 <div class="wmd-spinner"></div>
-                <div>Loading installed models...</div>
+                <div>Loading models...</div>
             </div>
         `;
 
         try {
-            // Load both installed models and unused models info in parallel
-            const [modelsResponse, _] = await Promise.all([
-                api.fetchApi("/workflow-models/installed"),
-                this.loadUnusedModels()
-            ]);
-            const data = await modelsResponse.json();
+            const response = await api.fetchApi("/workflow-models/installed");
+            const data = await response.json();
             this.installedModels = data.models || [];
-
             this.renderBrowserTab();
         } catch (error) {
-            console.error("[WMD] Error loading installed models:", error);
-            content.innerHTML = `<div class="wmd-browser-empty">Error loading models. Make sure the backend is running.</div>`;
+            console.error("[WMD] Error loading browser tab:", error);
+            content.innerHTML = `
+                <div class="wmd-workflows-layout">
+                    <div style="padding: 40px; text-align: center; color: #f87171;">
+                        <div style="font-size: 24px; margin-bottom: 10px;">⚠️</div>
+                        <div>Error loading models</div>
+                        <div style="font-size: 12px; margin-top: 5px;">${error.message || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
         }
     }
 
@@ -3340,163 +3993,235 @@ class WorkflowModelsDownloader {
         const content = document.getElementById("wmd-content-browser");
         if (!content) return;
 
-        const filteredModels = this.getFilteredBrowserModels();
+        try {
+            this.installedModels = this.installedModels || [];
+            this.browserFilter = this.browserFilter || '';
+            this.browserType = this.browserType || '';
 
-        // Build folder tree data - count models per type
-        const typeCounts = {};
-        this.installedModels.forEach(m => {
-            typeCounts[m.type] = (typeCounts[m.type] || 0) + 1;
-        });
-        const types = Object.keys(typeCounts).sort();
+            // Get unique types for dropdown
+            const types = [...new Set(this.installedModels.map(m => m.type))].sort();
 
-        // Folder icons for different types
-        const folderIcons = {
-            'checkpoints': '🎨',
-            'loras': '🔗',
-            'vae': '🌈',
-            'controlnet': '🎛️',
-            'clip': '📝',
-            'clip_vision': '👁️',
-            'text_encoders': '📝',
-            'embeddings': '💎',
-            'upscale_models': '🔍',
-            'hypernetworks': '🕸️',
-            'diffusion_models': '🌀',
-            'unet': '🧠',
-            'default': '📁'
-        };
+            // Filter models
+            const filteredModels = this.installedModels.filter(m => {
+                const matchesSearch = !this.browserFilter ||
+                    m.filename.toLowerCase().includes(this.browserFilter.toLowerCase());
+                const matchesType = !this.browserType || m.type === this.browserType;
+                return matchesSearch && matchesType;
+            });
 
-        const getFolderIcon = (type) => folderIcons[type] || folderIcons.default;
-
-        // Build folder tree HTML
-        const folderTreeHtml = types.map(type => `
-            <div class="wmd-folder-item ${this.browserType === type ? 'active' : ''}"
-                 onclick="window.wmdInstance.onBrowserTypeChange('${type}')">
-                <span class="wmd-folder-item-icon">${getFolderIcon(type)}</span>
-                <span class="wmd-folder-item-name">${type}</span>
-                <span class="wmd-folder-item-count">${typeCounts[type]}</span>
-            </div>
-        `).join('');
-
-        const unusedCount = this.unusedModels.size;
-
-        content.innerHTML = `
-            <div class="wmd-browser-layout">
-                <!-- Folder Tree Sidebar -->
-                <div class="wmd-browser-sidebar">
-                    <div class="wmd-browser-sidebar-title">Folders</div>
-                    <div class="wmd-folder-tree">
-                        <div class="wmd-folder-item ${!this.browserShowUnused && this.browserType === '' ? 'active' : ''}"
-                             onclick="window.wmdInstance.browserShowUnused = false; window.wmdInstance.onBrowserTypeChange('')">
-                            <span class="wmd-folder-item-icon">📂</span>
-                            <span class="wmd-folder-item-name">All Models</span>
-                            <span class="wmd-folder-item-count">${this.installedModels.length}</span>
-                        </div>
-                        <div class="wmd-folder-item ${this.browserShowUnused ? 'active' : ''}"
-                             onclick="window.wmdInstance.toggleUnusedFilter()"
-                             title="Models not used in any workflow scans (scan multiple workflows to build usage history)">
-                            <span class="wmd-folder-item-icon">🗑️</span>
-                            <span class="wmd-folder-item-name">Unused</span>
-                            <span class="wmd-folder-item-count">${unusedCount}</span>
-                        </div>
-                        ${folderTreeHtml}
-                    </div>
-
-                    <!-- Cache Controls -->
-                    <div class="wmd-cache-controls">
-                        <div class="wmd-cache-controls-title">Usage Tracking</div>
-                        <div class="wmd-cache-info" id="wmd-cache-info">
-                            Tracked: ${this.trackedModelCount || 0} models
-                        </div>
-                        <input type="text" class="wmd-scan-input" id="wmd-scan-path"
-                               placeholder="Workflow folder (leave empty for default)"
-                               title="Path to scan for workflow JSON files">
-                        <div class="wmd-cache-buttons">
-                            <button class="scan" onclick="window.wmdInstance.scanAllWorkflows()"
-                                    title="Scan all JSON files in folder to find used models">
-                                Scan All Workflows
-                            </button>
-                            <button class="clear" onclick="window.wmdInstance.clearUsageCache()"
-                                    title="Clear usage tracking cache">
-                                Clear Cache
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Main Content Area -->
-                <div class="wmd-browser-main">
-                    <div class="wmd-browser-controls">
-                        <input type="text" class="wmd-browser-search" id="wmd-browser-search"
-                               placeholder="Search models..."
+            content.innerHTML = `
+                <div style="display: flex; flex-direction: column; height: 100%;">
+                    <!-- Header with search and filter -->
+                    <div style="padding: 12px; border-bottom: 1px solid #333; display: flex; gap: 10px; align-items: center;">
+                        <input type="text" placeholder="Search models..."
                                value="${this.browserFilter}"
-                               onkeyup="window.wmdInstance.onBrowserSearch(this.value)">
-                        <select class="wmd-filter-select" onchange="window.wmdInstance.onBrowserSort(this.value)">
-                            <option value="name" ${this.browserSort === 'name' ? 'selected' : ''}>Sort by Name</option>
-                            <option value="size" ${this.browserSort === 'size' ? 'selected' : ''}>Sort by Size</option>
-                            <option value="date" ${this.browserSort === 'date' ? 'selected' : ''}>Sort by Date</option>
+                               onkeyup="window.wmdInstance.onBrowserSearch(this.value)"
+                               style="flex: 1; padding: 8px 12px; background: #333; border: 1px solid #444; border-radius: 4px; color: #fff;">
+                        <select onchange="window.wmdInstance.onBrowserTypeChange(this.value)"
+                                style="padding: 8px 12px; background: #333; border: 1px solid #444; border-radius: 4px; color: #fff;">
+                            <option value="" ${!this.browserType ? 'selected' : ''}>All Types (${this.installedModels.length})</option>
+                            ${types.map(t => {
+                                const count = this.installedModels.filter(m => m.type === t).length;
+                                return `<option value="${t}" ${this.browserType === t ? 'selected' : ''}>${t} (${count})</option>`;
+                            }).join('')}
                         </select>
-                        <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
-                                onclick="window.wmdInstance.loadBrowserTab()">
-                            Refresh
-                        </button>
+                        <button class="wmd-btn wmd-btn-secondary" onclick="window.wmdInstance.loadBrowserTab()" title="Refresh">🔄</button>
                     </div>
 
-                    <div class="wmd-browser-list">
-                        ${filteredModels.length > 0 ? filteredModels.map(m => this.renderBrowserItem(m)).join('') : `
-                            <div class="wmd-browser-empty">
-                                ${this.browserFilter || this.browserType ? 'No models match your filters' : 'No models installed'}
+                    <!-- Models list -->
+                    <div style="flex: 1; overflow-y: auto; padding: 8px;">
+                        ${filteredModels.length > 0 ? `
+                            <table style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid #444; color: #888; font-size: 11px; text-transform: uppercase;">
+                                        <th style="text-align: left; padding: 8px;">Filename</th>
+                                        <th style="text-align: left; padding: 8px; width: 100px;">Type</th>
+                                        <th style="text-align: right; padding: 8px; width: 80px;">Size</th>
+                                        <th style="text-align: center; padding: 8px; width: 60px;">Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${filteredModels.map(m => {
+                                        const escapedPath = m.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                                        return `
+                                            <tr style="border-bottom: 1px solid #333;">
+                                                <td style="padding: 8px; font-size: 12px; word-break: break-all;">${m.filename}</td>
+                                                <td style="padding: 8px; font-size: 11px; color: #888;">${m.type}</td>
+                                                <td style="padding: 8px; font-size: 11px; color: #888; text-align: right;">${m.size_human}</td>
+                                                <td style="padding: 8px; text-align: center;">
+                                                    <button class="wmd-btn wmd-btn-small"
+                                                            onclick="window.wmdInstance.deleteModel('${escapedPath}')"
+                                                            style="background: #dc2626; padding: 4px 8px;"
+                                                            title="Delete">🗑️</button>
+                                                </td>
+                                            </tr>
+                                        `;
+                                    }).join('')}
+                                </tbody>
+                            </table>
+                        ` : `
+                            <div style="padding: 40px; text-align: center; color: #666;">
+                                No models found
                             </div>
                         `}
                     </div>
-                </div>
-            </div>
-        `;
 
-        // Update footer
-        this.updateFooterForTab('browser');
-    }
-
-    renderBrowserItem(model) {
-        const escapedPath = model.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const isUnused = this.unusedModels.has(model.filename);
-        const unusedBadge = isUnused ? '<span class="wmd-unused-badge" title="Not used in any scanned workflow">unused</span>' : '';
-        return `
-            <div class="wmd-browser-item">
-                <div class="wmd-browser-item-info">
-                    <div class="wmd-browser-item-name">${model.filename}</div>
-                    <div class="wmd-browser-item-meta">
-                        <span class="wmd-type-badge">${model.type}</span>
-                        ${unusedBadge}
-                        <span>${model.size_human}</span>
+                    <!-- Footer -->
+                    <div style="padding: 8px 12px; border-top: 1px solid #333; color: #888; font-size: 11px;">
+                        Showing ${filteredModels.length} of ${this.installedModels.length} models
                     </div>
                 </div>
-                <div class="wmd-browser-item-actions">
-                    <button onclick="window.wmdInstance.copyModelPath('${escapedPath}')" title="Copy Path">📋</button>
-                    <button onclick="window.wmdInstance.viewModelMetadata('${escapedPath}')" title="View Details">ℹ️</button>
-                    <button class="danger" onclick="window.wmdInstance.deleteModel('${escapedPath}')" title="Delete">🗑️</button>
-                </div>
-            </div>
-        `;
+            `;
+
+            window.wmdInstance = this;
+        } catch (error) {
+            console.error("[WMD] Error rendering browser tab:", error);
+            content.innerHTML = `<div style="padding: 40px; text-align: center; color: #f87171;">Error loading models</div>`;
+        }
     }
 
-    getFilteredBrowserModels() {
-        let models = [...this.installedModels];
+    async selectBrowserModel(filename) {
+        this.selectedBrowserModel = this.installedModels.find(m => m.filename === filename) || null;
+        this.selectedModelInfo = null;
+        this.selectedModelReadme = null;
 
-        // Debug logging
-        if (this.browserType) {
-            const matchingTypes = models.filter(m => m.type === this.browserType);
-            console.log(`[WMD] Filtering by type '${this.browserType}': ${matchingTypes.length} matches out of ${models.length} total`);
-            if (matchingTypes.length === 0 && models.length > 0) {
-                const availableTypes = [...new Set(models.map(m => m.type))];
-                console.log(`[WMD] Available types:`, availableTypes);
+        if (this.selectedBrowserModel) {
+            // Load model URL info from cache/metadata
+            try {
+                const response = await api.fetchApi(`/workflow-models/model-url?filename=${encodeURIComponent(filename)}`);
+                if (response.ok) {
+                    this.selectedModelInfo = await response.json();
+                }
+            } catch (e) {
+                console.error("[WMD] Error loading model URL info:", e);
             }
         }
 
-        // Filter by unused
-        if (this.browserShowUnused) {
-            models = models.filter(m => this.unusedModels.has(m.filename));
+        this.renderBrowserTab();
+    }
+
+    async findModelUrl(filename) {
+        this.showNotification('Searching HuggingFace & CivitAI...', 'info');
+
+        try {
+            const response = await api.fetchApi('/workflow-models/find-model-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename })
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.url) {
+                const source = result.source === 'huggingface_api' ? 'HuggingFace' :
+                               result.source === 'civitai_api' ? 'CivitAI' : result.source;
+                this.showNotification(`Found on ${source}!`, 'success');
+                // Reload model info to show the URL
+                await this.selectBrowserModel(filename);
+            } else {
+                this.showNotification('Not found on HuggingFace or CivitAI', 'error');
+            }
+        } catch (e) {
+            console.error("[WMD] Error finding model URL:", e);
+            this.showNotification('Error searching for URL', 'error');
         }
+    }
+
+    async saveModelUrl(filename) {
+        const input = document.getElementById('wmd-model-url-input');
+        if (!input) return;
+
+        const url = input.value.trim();
+        if (!url) {
+            this.showNotification('Please enter a URL', 'error');
+            return;
+        }
+
+        // Validate URL
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            this.showNotification('Please enter a valid URL', 'error');
+            return;
+        }
+
+        try {
+            const response = await api.fetchApi('/workflow-models/save-model-url', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename, url })
+            });
+
+            if (response.ok) {
+                this.showNotification('URL saved', 'success');
+                // Reload model info
+                await this.selectBrowserModel(filename);
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Failed to save URL', 'error');
+            }
+        } catch (e) {
+            console.error("[WMD] Error saving model URL:", e);
+            this.showNotification('Error saving URL', 'error');
+        }
+    }
+
+    async loadModelReadme(url) {
+        if (!url || !url.includes('huggingface.co')) return;
+
+        try {
+            const response = await api.fetchApi(`/workflow-models/hf-readme?url=${encodeURIComponent(url)}`);
+            if (response.ok) {
+                const data = await response.json();
+                this.selectedModelReadme = data.readme || '<div style="color: #666;">No README available</div>';
+            } else {
+                this.selectedModelReadme = '<div style="color: #666;">Could not load README</div>';
+            }
+        } catch (e) {
+            console.error("[WMD] Error loading README:", e);
+            this.selectedModelReadme = '<div style="color: #666;">Error loading README</div>';
+        }
+
+        // Update just the README section
+        const readmeEl = document.getElementById('wmd-model-readme');
+        if (readmeEl) {
+            readmeEl.innerHTML = this.selectedModelReadme;
+        }
+    }
+
+    async scanModelMetadata() {
+        this.showNotification('Scanning model metadata...', 'info');
+
+        try {
+            const response = await api.fetchApi('/workflow-models/scan-model-metadata', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ force: false })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                const sources = [];
+                if (result.from_safetensors > 0) sources.push(`${result.from_safetensors} from files`);
+                if (result.from_model_list > 0) sources.push(`${result.from_model_list} from model-list`);
+                const sourceInfo = sources.length > 0 ? ` (${sources.join(', ')})` : '';
+
+                this.showNotification(
+                    `Scanned ${result.scanned} models, found URLs for ${result.updated}${sourceInfo}`,
+                    'success'
+                );
+                // Reload to show updated info
+                await this.loadBrowserTab();
+            } else {
+                const error = await response.json();
+                this.showNotification(error.error || 'Failed to scan metadata', 'error');
+            }
+        } catch (e) {
+            console.error("[WMD] Error scanning metadata:", e);
+            this.showNotification('Error scanning metadata', 'error');
+        }
+    }
+
+    getFilteredBrowserModels() {
+        let models = [...(this.installedModels || [])];
 
         // Filter by search
         if (this.browserFilter) {
@@ -3509,15 +4234,8 @@ class WorkflowModelsDownloader {
             models = models.filter(m => m.type === this.browserType);
         }
 
-        // Sort
-        models.sort((a, b) => {
-            switch (this.browserSort) {
-                case 'size': return b.size - a.size;
-                case 'date': return b.modified - a.modified;
-                case 'type': return a.type.localeCompare(b.type);
-                default: return a.filename.localeCompare(b.filename);
-            }
-        });
+        // Sort by name
+        models.sort((a, b) => a.filename.localeCompare(b.filename));
 
         return models;
     }
@@ -3529,21 +4247,7 @@ class WorkflowModelsDownloader {
 
     onBrowserTypeChange(value) {
         this.browserType = value;
-        // Clear unused filter when selecting a specific type (unless it's from All Models click which handles it)
-        if (value) {
-            this.browserShowUnused = false;
-        }
-        this.renderBrowserTab();
-    }
-
-    onBrowserSort(value) {
-        this.browserSort = value;
-        this.renderBrowserTab();
-    }
-
-    toggleUnusedFilter() {
-        this.browserShowUnused = !this.browserShowUnused;
-        this.browserType = ""; // Clear type filter when toggling unused
+        this.selectedBrowserModel = null; // Clear selection when changing folder
         this.renderBrowserTab();
     }
 
@@ -3562,85 +4266,6 @@ class WorkflowModelsDownloader {
             console.log("[WMD] Tracked usage for", models.filter(m => m.exists).length, "models");
         } catch (error) {
             console.error("[WMD] Error tracking usage:", error);
-        }
-    }
-
-    async loadUnusedModels() {
-        try {
-            const response = await api.fetchApi("/workflow-models/unused");
-            const result = await response.json();
-
-            if (result.success) {
-                this.unusedModels = new Set(result.unused_models.map(m => m.filename));
-                this.trackedModelCount = result.tracked_count || 0;
-                console.log("[WMD] Loaded", this.unusedModels.size, "unused models,", this.trackedModelCount, "tracked");
-            }
-        } catch (error) {
-            console.error("[WMD] Error loading unused models:", error);
-        }
-    }
-
-    async scanAllWorkflows() {
-        const pathInput = document.getElementById('wmd-scan-path');
-        const directory = pathInput ? pathInput.value.trim() : '';
-
-        try {
-            this.showNotification('Scanning workflows...', 'info');
-
-            const response = await api.fetchApi("/workflow-models/scan-all-workflows", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ directory })
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                this.showNotification(
-                    `Scanned ${result.workflows_scanned} workflows, found ${result.models_found} models`,
-                    'success'
-                );
-                // Reload the browser tab to update unused counts
-                await this.loadBrowserTab();
-            } else {
-                this.showNotification(result.error || 'Failed to scan workflows', 'error');
-                if (result.default_path) {
-                    // Show the default path in the input for reference
-                    if (pathInput) pathInput.placeholder = result.default_path;
-                }
-            }
-        } catch (error) {
-            console.error("[WMD] Error scanning workflows:", error);
-            this.showNotification('Error scanning workflows: ' + error.message, 'error');
-        }
-    }
-
-    async clearUsageCache() {
-        if (!confirm('Clear all usage tracking data? This cannot be undone.')) {
-            return;
-        }
-
-        try {
-            const response = await api.fetchApi("/workflow-models/clear-cache", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({})
-            });
-
-            const result = await response.json();
-
-            if (result.success) {
-                this.showNotification('Usage cache cleared', 'success');
-                this.unusedModels = new Set();
-                this.trackedModelCount = 0;
-                // Reload to update the view
-                await this.loadBrowserTab();
-            } else {
-                this.showNotification(result.error || 'Failed to clear cache', 'error');
-            }
-        } catch (error) {
-            console.error("[WMD] Error clearing cache:", error);
-            this.showNotification('Error clearing cache: ' + error.message, 'error');
         }
     }
 
@@ -3735,11 +4360,22 @@ class WorkflowModelsDownloader {
     }
 
     // Load Help tab content
-    loadHelpTab() {
+    async loadHelpTab() {
         const content = document.getElementById("wmd-content-help");
         if (!content) return;
 
-        const helpPanel = this.createHelpPanel();
+        // Load version info first
+        let versionInfo = { installed: 'unknown', latest: null, update_available: false, github_url: '', registry_url: '' };
+        try {
+            const response = await api.fetchApi("/workflow-models/version");
+            if (response.ok) {
+                versionInfo = await response.json();
+            }
+        } catch (e) {
+            console.error("[WMD] Error loading version info:", e);
+        }
+
+        const helpPanel = this.createHelpPanel(versionInfo);
         helpPanel.style.margin = '0';
         helpPanel.style.border = 'none';
         helpPanel.style.borderRadius = '0';
@@ -3753,12 +4389,43 @@ class WorkflowModelsDownloader {
         this.selectTab('help');
     }
 
-    createHelpPanel() {
+    createHelpPanel(versionInfo = {}) {
         const panel = document.createElement('div');
         panel.id = 'wmd-help-panel';
         panel.className = 'wmd-help-panel';
 
+        // Build version card
+        const updateButton = versionInfo.update_available
+            ? `<a href="${versionInfo.registry_url}" target="_blank" class="wmd-btn wmd-btn-warning wmd-btn-small" style="margin-left: 12px;">Update Available</a>`
+            : '';
+
+        const latestInfo = versionInfo.latest
+            ? `<span style="color: #888; margin-left: 8px;">(Latest: ${versionInfo.latest})</span>`
+            : '';
+
+        const versionCard = `
+            <div class="wmd-version-card" style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); border: 1px solid #0f3460; border-radius: 8px; padding: 16px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 24px;">📦</span>
+                    <div>
+                        <div style="font-weight: bold; font-size: 16px; color: #e94560;">Workflow Models Downloader</div>
+                        <div style="color: #888; font-size: 12px; margin-top: 4px;">
+                            Version: <span style="color: #4CAF50; font-weight: bold;">${versionInfo.installed || 'unknown'}</span>
+                            ${latestInfo}
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <a href="${versionInfo.github_url || 'https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader'}" target="_blank" class="wmd-btn wmd-btn-secondary wmd-btn-small" title="View on GitHub">
+                        GitHub
+                    </a>
+                    ${updateButton}
+                </div>
+            </div>
+        `;
+
         panel.innerHTML = `
+            ${versionCard}
             <div class="wmd-help-title">
                 <span style="color: #2196F3;">?</span> Help & FAQ
             </div>
@@ -3902,6 +4569,49 @@ class WorkflowModelsDownloader {
         }
     }
 
+    async copyToClipboard(text, successMsg = 'Copied to clipboard') {
+        try {
+            await navigator.clipboard.writeText(text);
+            this.showNotification(successMsg, 'success');
+        } catch (error) {
+            console.error("[WMD] Copy failed:", error);
+            this.showNotification('Failed to copy', 'error');
+        }
+    }
+
+    copyModelMetadata(index) {
+        const model = this.models[index];
+        if (!model) return;
+
+        const metadata = {
+            filename: model.filename,
+            type: model.type,
+            directory: model.directory,
+            status: model.exists ? 'EXISTS' : 'MISSING',
+            url: model.url || 'No URL',
+            hf_repo: model.hf_repo || '',
+            hf_path: model.hf_path || '',
+            source: model.source || ''
+        };
+
+        this.copyToClipboard(JSON.stringify(metadata, null, 2), 'Model info copied');
+    }
+
+    copyDownloadInfo(filename, status, error = '') {
+        const info = {
+            filename: filename,
+            status: status,
+            error: error || undefined,
+            timestamp: new Date().toISOString()
+        };
+
+        this.copyToClipboard(JSON.stringify(info, null, 2), 'Download info copied');
+    }
+
+    copyError(error) {
+        this.copyToClipboard(error, 'Error copied');
+    }
+
     showNotification(message, type = 'info') {
         const toast = document.createElement('div');
         toast.style.cssText = `
@@ -3935,6 +4645,585 @@ class WorkflowModelsDownloader {
             toast.style.animation = 'wmd-slide-out 0.3s ease';
             setTimeout(() => toast.remove(), 300);
         }, 3000);
+    }
+
+    // ==================== Workflows Tab ====================
+
+    async loadWorkflowsTab() {
+        const content = document.getElementById("wmd-content-workflows");
+        if (!content) return;
+
+        // Initialize state
+        this.workflowsList = [];
+        this.selectedWorkflow = null;
+        this.workflowModels = [];
+        this.selectedWorkflowModel = null;
+        this.workflowsFilter = '';
+
+        try {
+            // Load workflows list from default directories
+            const response = await api.fetchApi("/workflow-models/list-workflows");
+            if (response.ok) {
+                const data = await response.json();
+                if (data.success) {
+                    this.workflowsList = data.workflows || [];
+                }
+            }
+
+            this.renderWorkflowsTab();
+        } catch (error) {
+            console.error("[WMD] Error loading workflows tab:", error);
+            // Show error state instead of stuck spinner
+            content.innerHTML = `
+                <div class="wmd-workflows-layout">
+                    <div style="padding: 40px; text-align: center; color: #f87171;">
+                        <div style="font-size: 24px; margin-bottom: 10px;">⚠️</div>
+                        <div>Error loading workflows</div>
+                        <div style="font-size: 12px; margin-top: 5px;">${error.message || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    renderWorkflowsTab() {
+        const content = document.getElementById("wmd-content-workflows");
+        if (!content) return;
+
+        try {
+            // Ensure arrays are always valid
+            this.workflowsList = this.workflowsList || [];
+            this.workflowModels = this.workflowModels || [];
+            this.workflowsFilter = this.workflowsFilter || '';
+
+            const filteredWorkflows = this.workflowsList.filter(w =>
+                w && w.name && w.name.toLowerCase().includes(this.workflowsFilter.toLowerCase())
+            );
+
+        // Build workflows list HTML
+        const workflowsHtml = filteredWorkflows.length > 0
+            ? filteredWorkflows.map((w, i) => `
+                <div class="wmd-workflow-item ${this.selectedWorkflow?.path === w.path ? 'active' : ''}"
+                     onclick="window.wmdInstance.selectWorkflowItem('${w.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')">
+                    <span class="wmd-workflow-item-icon">📄</span>
+                    <div class="wmd-workflow-item-info">
+                        <div class="wmd-workflow-item-name">${w.name}</div>
+                        <div class="wmd-workflow-item-path">${w.folder}/${w.relative_path}</div>
+                    </div>
+                </div>
+            `).join('')
+            : '<div class="wmd-workflows-empty">No workflows found</div>';
+
+        // Build models list HTML
+        let modelsHtml = '<div class="wmd-workflows-empty">Select a workflow to see models</div>';
+        if (this.selectedWorkflow && this.workflowModels.length > 0) {
+            modelsHtml = this.workflowModels.map((m, i) => `
+                <div class="wmd-model-item ${!m.exists ? 'missing' : ''} ${this.selectedWorkflowModel?.filename === m.filename ? 'active' : ''}"
+                     onclick="window.wmdInstance.selectWorkflowModelItem(${i})">
+                    <div class="wmd-model-item-info">
+                        <div class="wmd-model-item-name">${m.filename}</div>
+                        <div class="wmd-model-item-type">${m.type} • ${m.node_class || 'Unknown Node'}</div>
+                    </div>
+                    <span class="wmd-model-item-status ${m.exists ? 'exists' : 'missing'}">
+                        ${m.exists ? 'OK' : 'MISSING'}
+                    </span>
+                </div>
+            `).join('');
+        } else if (this.selectedWorkflow && this.workflowModels.length === 0) {
+            modelsHtml = '<div class="wmd-workflows-empty">No models in this workflow</div>';
+        }
+
+        // Build model details HTML
+        let detailsHtml = '<div class="wmd-workflows-empty">Select a model to see details</div>';
+        if (this.selectedWorkflowModel) {
+            const m = this.selectedWorkflowModel;
+
+            // Build source link or input
+            let sourceHtml = '';
+            const hasSource = m.hf_repo || m.civitai_url || m.url;
+            if (m.hf_repo) {
+                sourceHtml = `<a href="https://huggingface.co/${m.hf_repo}" target="_blank">${m.hf_repo}</a>`;
+            } else if (m.civitai_url) {
+                sourceHtml = `<a href="${m.civitai_url}" target="_blank">View on CivitAI</a>`;
+            } else if (m.url) {
+                sourceHtml = `<a href="${m.url}" target="_blank">Direct URL</a>`;
+            } else {
+                // No source - show input field
+                sourceHtml = `
+                    <div style="display: flex; gap: 6px; align-items: center; width: 100%;">
+                        <input type="text" id="wmd-source-url-input"
+                               placeholder="Enter source URL..."
+                               style="flex: 1; padding: 4px 8px; font-size: 11px; background: #333; border: 1px solid #555; border-radius: 4px; color: #fff;">
+                        <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
+                                onclick="window.wmdInstance.saveModelSource()"
+                                style="font-size: 10px; padding: 4px 8px; white-space: nowrap;">
+                            Save
+                        </button>
+                    </div>
+                `;
+            }
+
+            // Build advanced search section
+            const advancedSearchEnabled = this.settings?.enable_advanced_search && this.settings?.tavily_api_key_set;
+            const isDiffusionModel = m.type === 'diffusion_model' || m.type === 'checkpoint' || m.type === 'unet';
+            const isSafetensor = m.filename?.endsWith('.safetensors');
+
+            let advancedSearchHtml = '';
+            if (advancedSearchEnabled) {
+                // Check for cached results (from memory cache first)
+                const cachedResults = this.searchCache[m.filename];
+                const cachedHtml = cachedResults ? this.formatSearchResults(cachedResults) : '';
+
+                advancedSearchHtml = `
+                    <div class="wmd-model-details-section">
+                        <div class="wmd-model-details-section-title" style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>Advanced Search</span>
+                            <button class="wmd-btn wmd-btn-secondary wmd-btn-small"
+                                    onclick="window.wmdInstance.searchModelAlternatives()"
+                                    id="wmd-adv-search-btn"
+                                    style="font-size: 11px; padding: 4px 8px;">
+                                ${cachedResults ? 'Refresh' : 'Search'}
+                            </button>
+                        </div>
+                        <div id="wmd-adv-search-results" style="padding: 10px;">${cachedHtml || '<div style="color: #666; font-size: 11px;">Loading...</div>'}</div>
+                    </div>
+                `;
+
+                // Load cached results from backend if not in memory
+                if (!cachedResults) {
+                    this.loadCachedSearchResults(m.filename);
+                }
+            } else {
+                advancedSearchHtml = `
+                    <div class="wmd-model-details-section">
+                        <div class="wmd-model-details-section-title">Advanced Search</div>
+                        <div style="padding: 20px; color: #888; font-size: 12px; text-align: center;">
+                            <p>Enable Advanced Search using Tavily for:</p>
+                            <ul style="text-align: left; margin: 10px 0; padding-left: 20px;">
+                                <li>Find possible download sources</li>
+                                <li>Discover alternative versions</li>
+                                ${isDiffusionModel && isSafetensor ? '<li>Find GGUF quantized versions</li>' : ''}
+                            </ul>
+                            <p style="margin-top: 10px;">
+                                <a href="#" onclick="window.wmdInstance.selectTab('help'); return false;" style="color: #4a9eff;">
+                                    Update Tavily API key in Settings
+                                </a>
+                            </p>
+                        </div>
+                    </div>
+                `;
+            }
+
+            detailsHtml = `
+                <div class="wmd-model-details-section">
+                    <div class="wmd-model-details-section-title">Model Information</div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Filename</div>
+                        <div class="wmd-model-details-value">${m.filename}</div>
+                    </div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Type</div>
+                        <div class="wmd-model-details-value">${m.type}</div>
+                    </div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Directory</div>
+                        <div class="wmd-model-details-value">${m.directory}</div>
+                    </div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Status</div>
+                        <div class="wmd-model-details-value" style="color: ${m.exists ? '#4CAF50' : '#f87171'}">
+                            ${m.exists ? `EXISTS (${m.local_size || 'unknown size'})` : 'MISSING'}
+                        </div>
+                    </div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Node</div>
+                        <div class="wmd-model-details-value">${m.node_class || 'Unknown'}</div>
+                    </div>
+                    <div class="wmd-model-details-row">
+                        <div class="wmd-model-details-label">Source</div>
+                        <div class="wmd-model-details-value" style="${!hasSource ? 'flex: 1;' : ''}">${sourceHtml}</div>
+                    </div>
+                </div>
+                ${advancedSearchHtml}
+            `;
+        }
+
+        // Count stats
+        const existsCount = this.workflowModels.filter(m => m.exists).length;
+        const missingCount = this.workflowModels.filter(m => !m.exists).length;
+
+        content.innerHTML = `
+            <div class="wmd-workflows-layout">
+                <!-- Column 1: Workflows List -->
+                <div class="wmd-workflows-column workflows-list">
+                    <div class="wmd-workflows-column-header">
+                        <span>Workflows</span>
+                        <button class="wmd-refresh-btn" onclick="window.wmdInstance.loadWorkflowsTab()" title="Refresh">🔄</button>
+                    </div>
+                    <div class="wmd-workflows-search">
+                        <input type="text" placeholder="Search workflows..."
+                               value="${this.workflowsFilter}"
+                               onkeyup="window.wmdInstance.onWorkflowsFilterChange(this.value)">
+                    </div>
+                    <div class="wmd-workflows-column-content">
+                        ${workflowsHtml}
+                    </div>
+                </div>
+
+                <!-- Column 2: Models List -->
+                <div class="wmd-workflows-column models-list">
+                    <div class="wmd-workflows-column-header">
+                        <span>Models ${this.selectedWorkflow ? `(${this.workflowModels.length})` : ''}</span>
+                        ${this.selectedWorkflow ? `
+                            <span style="font-size: 10px; color: #888; font-weight: normal;">
+                                <span style="color: #4CAF50;">${existsCount} OK</span> /
+                                <span style="color: #f87171;">${missingCount} Missing</span>
+                            </span>
+                        ` : ''}
+                    </div>
+                    <div class="wmd-workflows-column-content">
+                        ${modelsHtml}
+                    </div>
+                </div>
+
+                <!-- Column 3: Model Details -->
+                <div class="wmd-workflows-column model-details">
+                    <div class="wmd-workflows-column-header">
+                        <span>Model Details</span>
+                    </div>
+                    <div class="wmd-model-details-content">
+                        ${detailsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+
+            window.wmdInstance = this;
+        } catch (error) {
+            console.error("[WMD] Error rendering workflows tab:", error);
+            content.innerHTML = `
+                <div class="wmd-workflows-layout">
+                    <div style="padding: 40px; text-align: center; color: #f87171;">
+                        <div style="font-size: 24px; margin-bottom: 10px;">⚠️</div>
+                        <div>Error rendering workflows</div>
+                        <div style="font-size: 12px; margin-top: 5px;">${error.message || 'Unknown error'}</div>
+                    </div>
+                </div>
+            `;
+        }
+    }
+
+    async selectWorkflowItem(path) {
+        // Find workflow
+        const workflow = this.workflowsList.find(w => w.path === path);
+        if (!workflow) return;
+
+        this.selectedWorkflow = workflow;
+        this.selectedWorkflowModel = null;
+        this.workflowModels = [];
+
+        // Temporarily show loading
+        this.renderWorkflowsTab();
+
+        // Parse workflow to get models
+        try {
+            const response = await api.fetchApi("/workflow-models/parse-workflow", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ path: workflow.path })
+            });
+
+            const data = await response.json();
+            if (data.success) {
+                this.workflowModels = data.models || [];
+            }
+        } catch (error) {
+            console.error("[WMD] Error parsing workflow:", error);
+        }
+
+        this.renderWorkflowsTab();
+    }
+
+    selectWorkflowModelItem(index) {
+        this.selectedWorkflowModel = this.workflowModels[index];
+        this.renderWorkflowsTab();
+    }
+
+    onWorkflowsFilterChange(value) {
+        this.workflowsFilter = value;
+        this.renderWorkflowsTab();
+    }
+
+    // Helper to format time ago
+    getTimeAgo(date) {
+        const seconds = Math.floor((new Date() - date) / 1000);
+        if (seconds < 60) return 'just now';
+        const minutes = Math.floor(seconds / 60);
+        if (minutes < 60) return `${minutes}m ago`;
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return `${hours}h ago`;
+        const days = Math.floor(hours / 24);
+        if (days < 7) return `${days}d ago`;
+        return date.toLocaleDateString();
+    }
+
+    // Load cached search results from backend
+    async loadCachedSearchResults(filename) {
+        try {
+            const response = await api.fetchApi(`/workflow-models/tavily-cache/${encodeURIComponent(filename)}`);
+            const data = await response.json();
+
+            if (data.success && data.results) {
+                // Store in memory cache
+                this.searchCache[filename] = data;
+
+                // Update the results div if it exists
+                const resultsDiv = document.getElementById('wmd-adv-search-results');
+                const btn = document.getElementById('wmd-adv-search-btn');
+                if (resultsDiv) {
+                    resultsDiv.innerHTML = this.formatSearchResults(data);
+                }
+                if (btn) {
+                    btn.textContent = 'Refresh';
+                }
+            } else {
+                // No cached results
+                const resultsDiv = document.getElementById('wmd-adv-search-results');
+                if (resultsDiv) {
+                    resultsDiv.innerHTML = '<div style="color: #666; font-size: 11px;">Click Search to find sources and alternatives</div>';
+                }
+            }
+        } catch (error) {
+            console.error('[WMD] Error loading cached search results:', error);
+            const resultsDiv = document.getElementById('wmd-adv-search-results');
+            if (resultsDiv) {
+                resultsDiv.innerHTML = '<div style="color: #666; font-size: 11px;">Click Search to find sources and alternatives</div>';
+            }
+        }
+    }
+
+    // Save manually entered source URL
+    async saveModelSource() {
+        if (!this.selectedWorkflowModel) return;
+
+        const input = document.getElementById('wmd-source-url-input');
+        if (!input || !input.value.trim()) {
+            alert('Please enter a source URL');
+            return;
+        }
+
+        const url = input.value.trim();
+        const m = this.selectedWorkflowModel;
+        const filename = m.filename;
+
+        try {
+            const response = await api.fetchApi('/workflow-models/save-model-source', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: filename,
+                    url: url,
+                    model_type: m.type,
+                    directory: m.directory
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Update the model in our list
+                m.url = data.metadata?.url || url;
+                m.hf_repo = data.metadata?.hf_repo;
+                m.hf_path = data.metadata?.hf_path;
+                m.civitai_url = data.metadata?.civitai_url;
+
+                // Re-render to show updated source
+                this.renderWorkflowsTab();
+            } else {
+                alert(data.error || 'Failed to save source');
+            }
+        } catch (error) {
+            console.error('[WMD] Save source error:', error);
+            alert('Error saving source: ' + error.message);
+        }
+    }
+
+    // Extract best source from search results and update metadata
+    async extractSourceFromResults() {
+        if (!this.selectedWorkflowModel) return;
+
+        const m = this.selectedWorkflowModel;
+        const fullPath = m.filename;
+        const searchName = fullPath.split(/[\\\/]/).pop();
+        const cachedData = this.searchCache[fullPath];
+
+        if (!cachedData || !cachedData.results || cachedData.results.length === 0) {
+            alert('No search results to extract from. Please search first.');
+            return;
+        }
+
+        const btn = document.getElementById('wmd-extract-btn');
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Extracting...';
+        }
+
+        try {
+            const response = await api.fetchApi('/workflow-models/extract-source', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    filename: searchName,
+                    original_filename: fullPath,
+                    results: cachedData.results,
+                    model_type: m.type,
+                    directory: m.directory
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Update the model in our list
+                if (data.metadata) {
+                    m.url = data.metadata.url;
+                    m.hf_repo = data.metadata.hf_repo;
+                    m.hf_path = data.metadata.hf_path;
+                    m.civitai_url = data.metadata.civitai_url;
+                }
+
+                // Show success and re-render
+                if (btn) {
+                    btn.textContent = 'Source Updated!';
+                    btn.style.background = '#4CAF50';
+                }
+
+                // Re-render to show updated source
+                setTimeout(() => this.renderWorkflowsTab(), 1500);
+            } else {
+                if (btn) {
+                    btn.textContent = data.message || 'No source found';
+                    btn.style.background = '#666';
+                }
+            }
+        } catch (error) {
+            console.error('[WMD] Extract source error:', error);
+            if (btn) {
+                btn.textContent = 'Error';
+                btn.style.background = '#f44336';
+            }
+        }
+    }
+
+    // Format search results into HTML
+    formatSearchResults(data) {
+        const results = data.results || [];
+        let html = '';
+
+        // Show cache info if available
+        if (data.cached_at) {
+            const cachedDate = new Date(data.cached_at);
+            const timeAgo = this.getTimeAgo(cachedDate);
+            html += `<div style="color: #555; font-size: 9px; margin-bottom: 6px;">Cached ${timeAgo}</div>`;
+        }
+
+        // Show what was searched
+        if (data.query) {
+            html += `<div style="color: #666; font-size: 10px; margin-bottom: 8px;">Query: "${data.query}"</div>`;
+        }
+
+        if (results.length > 0) {
+            // Helper to get source icon/label based on URL
+            const getSourceStyle = (url) => {
+                if (url.includes('huggingface.co')) return { icon: '🤗', label: 'HuggingFace' };
+                if (url.includes('civitai.com')) return { icon: '🎨', label: 'CivitAI' };
+                if (url.includes('github.com')) return { icon: '📦', label: 'GitHub' };
+                return { icon: '🔗', label: 'Web' };
+            };
+
+            html += `<div style="color: #888; font-size: 11px; margin-bottom: 8px;">${results.length} results found</div>`;
+
+            results.forEach((r, idx) => {
+                const source = getSourceStyle(r.url);
+                const content = r.content ? r.content.substring(0, 120) + (r.content.length > 120 ? '...' : '') : '';
+
+                html += `
+                    <div style="margin-bottom: 8px; padding: 8px; background: #2a2a2a; border-radius: 4px; border-left: 3px solid #555;">
+                        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                            <span style="font-size: 12px;">${source.icon}</span>
+                            <span style="font-size: 9px; color: #888; background: #333; padding: 1px 4px; border-radius: 2px;">${source.label}</span>
+                        </div>
+                        <a href="${r.url}" target="_blank" style="color: #7aa2f7; font-size: 12px; word-break: break-word; text-decoration: none;">
+                            ${r.title || r.url}
+                        </a>
+                        ${content ? `<div style="color: #666; font-size: 10px; margin-top: 4px; line-height: 1.3;">${content}</div>` : ''}
+                        <div style="margin-top: 4px;">
+                            <a href="${r.url}" target="_blank" style="color: #555; font-size: 9px; word-break: break-all;">${r.url}</a>
+                        </div>
+                    </div>
+                `;
+            });
+        } else {
+            html = '<div style="color: #666; font-size: 11px;">No results found</div>';
+        }
+
+        return html;
+    }
+
+    async searchModelAlternatives() {
+        const resultsDiv = document.getElementById('wmd-adv-search-results');
+        const btn = document.getElementById('wmd-adv-search-btn');
+
+        if (!resultsDiv || !this.selectedWorkflowModel) return;
+
+        // Get filename from selected model
+        const fullPath = this.selectedWorkflowModel.filename;
+
+        // Extract just the filename, removing any folder path
+        const searchName = fullPath.split(/[\\\/]/).pop();
+
+        // Check if it's a diffusion model safetensor for GGUF search
+        const m = this.selectedWorkflowModel;
+        const isDiffusionModel = m.type === 'diffusion_model' || m.type === 'checkpoint' || m.type === 'unet';
+        const isSafetensor = fullPath?.endsWith('.safetensors');
+        const searchGguf = isDiffusionModel && isSafetensor;
+
+        // Show loading
+        resultsDiv.innerHTML = '<div style="color: #888; font-size: 11px;">Searching...</div>';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Searching...';
+        }
+
+        try {
+            const response = await api.fetchApi('/workflow-models/search-alternatives', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filename: searchName, original_filename: fullPath, search_gguf: searchGguf })
+            });
+
+            const data = await response.json();
+
+            if (!data.success) {
+                resultsDiv.innerHTML = `<div style="color: #f87171; font-size: 11px;">${data.error || 'Search failed'}</div>`;
+                return;
+            }
+
+            // Cache the results
+            this.searchCache[fullPath] = data;
+
+            // Format and display results
+            resultsDiv.innerHTML = this.formatSearchResults(data);
+
+        } catch (error) {
+            console.error('[WMD] Search alternatives error:', error);
+            resultsDiv.innerHTML = `<div style="color: #f87171; font-size: 11px;">Error: ${error.message}</div>`;
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Refresh';
+            }
+        }
     }
 }
 
@@ -4139,6 +5428,31 @@ app.registerExtension({
                     });
                 } catch (e) {
                     console.error("[WMD] Failed to save Advanced Search setting:", e);
+                }
+            }
+        });
+
+        app.ui.settings.addSetting({
+            id: "WorkflowModelsDownloader.MaxParallelDownloads",
+            category: ["Workflow Models Downloader", "Downloads"],
+            name: "Max Parallel Downloads",
+            tooltip: "Maximum number of simultaneous downloads (1-10). Higher values may speed up batch downloads but use more bandwidth.",
+            type: "slider",
+            attrs: {
+                min: 1,
+                max: 10,
+                step: 1
+            },
+            defaultValue: 3,
+            onChange: async (value) => {
+                try {
+                    await api.fetchApi("/workflow-models/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ max_parallel_downloads: parseInt(value) })
+                    });
+                } catch (e) {
+                    console.error("[WMD] Failed to save Max Parallel Downloads setting:", e);
                 }
             }
         });

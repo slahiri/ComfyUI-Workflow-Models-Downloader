@@ -1,2 +1,4 @@
 requests
 huggingface_hub
+tavily-python
+aiohttp

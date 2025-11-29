@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from aiohttp import web
+from logging.handlers import RotatingFileHandler
 
 import folder_paths
 from server import PromptServer
@@ -22,16 +23,114 @@ routes = PromptServer.instance.routes
 # Extension path
 EXTENSION_PATH = os.path.dirname(__file__)
 
+# Setup file logging
+LOG_FILE = os.path.join(EXTENSION_PATH, 'wmd.log')
+_file_handler = None
+
+def setup_file_logging():
+    """Setup file logging for the extension"""
+    global _file_handler
+    try:
+        # Create a rotating file handler (max 5MB, keep 3 backups)
+        _file_handler = RotatingFileHandler(
+            LOG_FILE,
+            maxBytes=5*1024*1024,
+            backupCount=3,
+            encoding='utf-8'
+        )
+        _file_handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+        _file_handler.setFormatter(formatter)
+
+        # Add handler to the root logger
+        logging.getLogger().addHandler(_file_handler)
+        logging.info("[WMD] File logging initialized: " + LOG_FILE)
+    except Exception as e:
+        logging.error(f"[WMD] Failed to setup file logging: {e}")
+
+# Initialize file logging
+setup_file_logging()
+
 # Settings file path
 SETTINGS_FILE = os.path.join(EXTENSION_PATH, 'settings.json')
 
+# Version info
+PYPROJECT_FILE = os.path.join(EXTENSION_PATH, 'pyproject.toml')
+GITHUB_REPO = "slahiri/ComfyUI-Workflow-Models-Downloader"
+REGISTRY_URL = "https://registry.comfy.org/nodes/comfyui-workflow-models-downloader"
+
+def get_installed_version():
+    """Get installed version from pyproject.toml"""
+    try:
+        logging.debug(f"[WMD] Looking for pyproject.toml at: {PYPROJECT_FILE}")
+        if not os.path.exists(PYPROJECT_FILE):
+            logging.warning(f"[WMD] pyproject.toml not found at: {PYPROJECT_FILE}")
+            return "1.8.3"  # Fallback to current version
+
+        with open(PYPROJECT_FILE, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # Simple regex to extract version
+            match = re.search(r'version\s*=\s*"([^"]+)"', content)
+            if match:
+                version = match.group(1)
+                logging.debug(f"[WMD] Found version: {version}")
+                return version
+            else:
+                logging.warning(f"[WMD] Could not find version in pyproject.toml")
+    except Exception as e:
+        logging.error(f"[WMD] Could not read version from pyproject.toml: {e}")
+    return "1.8.3"  # Fallback to current version
+
+def get_latest_version():
+    """Get latest version from GitHub releases API"""
+    try:
+        url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            tag = data.get('tag_name', '')
+            # Remove 'v' prefix if present
+            return tag.lstrip('v')
+    except Exception as e:
+        logging.debug(f"[WMD] Could not fetch latest version from GitHub: {e}")
+    return None
+
+def compare_versions(installed, latest):
+    """Compare version strings. Returns True if update is available."""
+    if not latest or installed == "unknown":
+        return False
+    try:
+        installed_parts = [int(x) for x in installed.split('.')]
+        latest_parts = [int(x) for x in latest.split('.')]
+        # Pad with zeros for comparison
+        while len(installed_parts) < len(latest_parts):
+            installed_parts.append(0)
+        while len(latest_parts) < len(installed_parts):
+            latest_parts.append(0)
+        return latest_parts > installed_parts
+    except:
+        return False
+
 # Search metadata cache file
-SEARCH_CACHE_FILE = os.path.join(EXTENSION_PATH, 'search_cache.json')
+# DEPRECATED: search_cache.json - now using model_metadata.json as single source of truth
+# SEARCH_CACHE_FILE = os.path.join(EXTENSION_PATH, 'search_cache.json')
+
+# Download history file for persistent tracking
+DOWNLOAD_HISTORY_FILE = os.path.join(EXTENSION_PATH, 'download_history.json')
+
+# Tavily search cache file for persistent caching of advanced search results
+TAVILY_CACHE_FILE = os.path.join(EXTENSION_PATH, 'tavily_cache.json')
 
 # Download progress tracking
 download_progress = {}
 download_lock = threading.Lock()
 cancelled_downloads = set()  # Track cancelled download IDs
+
+# Download history (persistent)
+download_history = []
 
 # Download queue system
 download_queue = []  # Queued downloads waiting to start
@@ -61,7 +160,8 @@ def load_settings():
         'huggingface_token': '',
         'civitai_api_key': '',
         'tavily_api_key': '',
-        'enable_advanced_search': False
+        'enable_advanced_search': False,
+        'max_parallel_downloads': 3
     }
 
     # First try extension's own settings file
@@ -86,7 +186,8 @@ def load_settings():
                     'huggingface_token': comfy_settings.get('WorkflowModelsDownloader.HuggingFaceToken', ''),
                     'civitai_api_key': comfy_settings.get('WorkflowModelsDownloader.CivitAIApiKey', ''),
                     'tavily_api_key': comfy_settings.get('WorkflowModelsDownloader.TavilyApiKey', ''),
-                    'enable_advanced_search': comfy_settings.get('WorkflowModelsDownloader.EnableAdvancedSearch', False)
+                    'enable_advanced_search': comfy_settings.get('WorkflowModelsDownloader.EnableAdvancedSearch', False),
+                    'max_parallel_downloads': comfy_settings.get('WorkflowModelsDownloader.MaxParallelDownloads', 3)
                 }
                 logging.info(f"[WMD] Loaded settings from ComfyUI native settings")
                 return _settings_cache
@@ -109,6 +210,121 @@ def save_settings(settings):
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Error saving settings: {e}")
         return False
+
+
+def load_download_history():
+    """Load download history from file"""
+    global download_history
+    try:
+        if os.path.exists(DOWNLOAD_HISTORY_FILE):
+            with open(DOWNLOAD_HISTORY_FILE, 'r', encoding='utf-8') as f:
+                download_history = json.load(f)
+                logging.info(f"[WMD] Loaded {len(download_history)} download history entries")
+                return download_history
+    except Exception as e:
+        logging.error(f"[WMD] Error loading download history: {e}")
+    download_history = []
+    return download_history
+
+
+def save_download_history():
+    """Save download history to file"""
+    global download_history
+    try:
+        with open(DOWNLOAD_HISTORY_FILE, 'w', encoding='utf-8') as f:
+            json.dump(download_history, f, indent=2)
+        return True
+    except Exception as e:
+        logging.error(f"[WMD] Error saving download history: {e}")
+        return False
+
+
+# Tavily search cache
+_tavily_cache = {}
+
+def load_tavily_cache():
+    """Load Tavily search cache from file"""
+    global _tavily_cache
+    try:
+        if os.path.exists(TAVILY_CACHE_FILE):
+            with open(TAVILY_CACHE_FILE, 'r', encoding='utf-8') as f:
+                _tavily_cache = json.load(f)
+                logging.info(f"[WMD] Loaded Tavily cache with {len(_tavily_cache)} entries")
+                return _tavily_cache
+    except Exception as e:
+        logging.error(f"[WMD] Error loading Tavily cache: {e}")
+    _tavily_cache = {}
+    return _tavily_cache
+
+
+def save_tavily_cache():
+    """Save Tavily search cache to file"""
+    global _tavily_cache
+    try:
+        with open(TAVILY_CACHE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(_tavily_cache, f, indent=2)
+        return True
+    except Exception as e:
+        logging.error(f"[WMD] Error saving Tavily cache: {e}")
+        return False
+
+
+def get_tavily_cached_result(filename):
+    """Get cached Tavily search result for a filename"""
+    global _tavily_cache
+    return _tavily_cache.get(filename)
+
+
+def set_tavily_cached_result(filename, data):
+    """Cache Tavily search result for a filename"""
+    global _tavily_cache
+    import datetime
+    data['cached_at'] = datetime.datetime.now().isoformat()
+    _tavily_cache[filename] = data
+    save_tavily_cache()
+
+
+def add_to_download_history(download_info):
+    """Add a download entry to history"""
+    global download_history
+    import datetime
+
+    # Create history entry
+    entry = {
+        'id': download_info.get('id', ''),
+        'filename': download_info.get('filename', ''),
+        'status': download_info.get('status', ''),
+        'error': download_info.get('error', ''),
+        'total_size': download_info.get('total_size', 0),
+        'timestamp': datetime.datetime.now().isoformat(),
+        'directory': download_info.get('directory', '')
+    }
+
+    # If download completed successfully, invalidate folder cache so the file is discoverable
+    if entry['status'] == 'completed' and entry['directory']:
+        # Extract folder type from directory path (e.g., "checkpoints" from "models/checkpoints")
+        folder_type = os.path.basename(entry['directory'].rstrip('/\\'))
+        if folder_type:
+            invalidate_folder_cache(folder_type)
+            logging.info(f"[WMD] Download complete, cache invalidated for: {folder_type}")
+
+    # Remove any existing entry with same filename to avoid duplicates
+    download_history = [h for h in download_history if h.get('filename') != entry['filename']]
+
+    # Add new entry at the beginning
+    download_history.insert(0, entry)
+
+    # Keep only last 100 entries
+    download_history = download_history[:100]
+
+    save_download_history()
+
+
+def clear_download_history():
+    """Clear all download history"""
+    global download_history
+    download_history = []
+    save_download_history()
 
 
 def get_huggingface_token():
@@ -169,8 +385,13 @@ def is_civitai_urn(value):
 
 def get_tavily_api_key():
     """Get Tavily API key from settings"""
+    global _settings_cache
+    # Force reload settings to get latest key
+    _settings_cache = None
     settings = load_settings()
-    return settings.get('tavily_api_key', '')
+    key = settings.get('tavily_api_key', '')
+    logging.info(f"[WMD] Tavily key loaded: {'*' * (len(key) - 4) + key[-4:] if key else 'NOT SET'}")
+    return key
 
 
 def is_advanced_search_enabled():
@@ -179,55 +400,75 @@ def is_advanced_search_enabled():
     return settings.get('enable_advanced_search', False) and bool(settings.get('tavily_api_key', ''))
 
 
-# Search metadata cache
-_search_cache = None
-
-
-def load_search_cache():
-    """Load search metadata cache from file"""
-    global _search_cache
-    if _search_cache is not None:
-        return _search_cache
-
-    try:
-        if os.path.exists(SEARCH_CACHE_FILE):
-            with open(SEARCH_CACHE_FILE, 'r', encoding='utf-8') as f:
-                _search_cache = json.load(f)
-                return _search_cache
-    except Exception as e:
-        logging.error(f"[Workflow-Models-Downloader] Error loading search cache: {e}")
-
-    _search_cache = {}
-    return _search_cache
-
-
-def save_search_cache(cache):
-    """Save search metadata cache to file"""
-    global _search_cache
-    try:
-        with open(SEARCH_CACHE_FILE, 'w', encoding='utf-8') as f:
-            json.dump(cache, f, indent=2)
-        _search_cache = cache
-        return True
-    except Exception as e:
-        logging.error(f"[Workflow-Models-Downloader] Error saving search cache: {e}")
-        return False
+# ============================================================================
+# Metadata Cache Functions (redirect to model_metadata.json)
+# ============================================================================
+# These functions now use model_metadata.json as the single source of truth
 
 
 def get_cached_metadata(filename):
-    """Get cached search metadata for a filename"""
-    cache = load_search_cache()
-    return cache.get(filename)
+    """Get cached metadata for a filename from model_metadata.json"""
+    # Import here to avoid circular dependency (load_model_metadata defined later)
+    metadata = _get_model_metadata_safe()
+    basename = os.path.basename(filename)
+    return metadata.get(filename) or metadata.get(basename)
 
 
 def save_search_metadata(filename, metadata):
-    """Save search metadata for a filename"""
-    cache = load_search_cache()
-    metadata['cached_at'] = json.dumps({"$date": str(os.path.getmtime(SEARCH_CACHE_FILE) if os.path.exists(SEARCH_CACHE_FILE) else 0)})
+    """Save search metadata for a filename to model_metadata.json"""
+    basename = os.path.basename(filename)
     import datetime
     metadata['cached_at'] = datetime.datetime.now().isoformat()
-    cache[filename] = metadata
-    save_search_cache(cache)
+
+    # Update model_metadata.json
+    all_metadata = _get_model_metadata_safe()
+    existing = all_metadata.get(basename, {})
+
+    # Merge new metadata (don't overwrite user_url)
+    for key, value in metadata.items():
+        if key == 'user_url' and existing.get('user_url'):
+            continue  # Don't overwrite user-provided URL
+        if value is not None and value != '':
+            existing[key] = value
+
+    existing['filename'] = basename
+    all_metadata[basename] = existing
+    _save_model_metadata_safe(all_metadata)
+
+
+def _get_model_metadata_safe():
+    """Safe wrapper to get model metadata (handles import order)"""
+    global _model_metadata_cache
+    if _model_metadata_cache is not None:
+        return _model_metadata_cache
+    try:
+        model_metadata_file = os.path.join(os.path.dirname(__file__), "model_metadata.json")
+        if os.path.exists(model_metadata_file):
+            with open(model_metadata_file, 'r', encoding='utf-8') as f:
+                _model_metadata_cache = json.load(f)
+                return _model_metadata_cache
+    except Exception as e:
+        logging.error(f"[WMD] Error loading model metadata: {e}")
+    _model_metadata_cache = {}
+    return _model_metadata_cache
+
+
+def _save_model_metadata_safe(metadata):
+    """Safe wrapper to save model metadata"""
+    global _model_metadata_cache
+    try:
+        model_metadata_file = os.path.join(os.path.dirname(__file__), "model_metadata.json")
+        with open(model_metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+        _model_metadata_cache = metadata
+        return True
+    except Exception as e:
+        logging.error(f"[WMD] Error saving model metadata: {e}")
+        return False
+
+
+# Global cache for model metadata (shared with functions defined later)
+_model_metadata_cache = None
 
 
 def _cache_download_url(filename, url, source, hf_repo=None, hf_path=None, model_name=None, civitai_url=None):
@@ -1079,14 +1320,48 @@ def find_model_alternatives(filename, target_dir):
     return alternatives[:5]  # Return top 5 alternatives
 
 
+def invalidate_folder_cache(folder_type):
+    """Invalidate ComfyUI's folder cache for a specific folder type so new files are discovered"""
+    try:
+        # Handle subdirectories: extract base folder type from paths like "loras/subfolder"
+        folder_type_normalized = folder_type.replace('\\', '/')
+        base_folder_type = folder_type_normalized.split('/')[0]
+
+        # Clear the cache for this folder type
+        if hasattr(folder_paths, 'filename_list_cache'):
+            dirs_to_clear = [base_folder_type]
+            if base_folder_type in EQUIVALENT_DIRECTORIES:
+                dirs_to_clear = EQUIVALENT_DIRECTORIES[base_folder_type]
+
+            for ft in dirs_to_clear:
+                if ft in folder_paths.filename_list_cache:
+                    del folder_paths.filename_list_cache[ft]
+                    logging.debug(f"[WMD] Invalidated folder cache for: {ft}")
+    except Exception as e:
+        logging.debug(f"[WMD] Could not invalidate cache: {e}")
+
+
 def check_model_exists(target_dir, filename):
     """Check if model file exists using ComfyUI's folder_paths system.
     This ensures we match exactly what ComfyUI can find and load."""
 
+    # Handle subdirectories: "loras/subfolder" -> folder_type="loras", subpath="subfolder"
+    # Normalize path separators
+    target_dir_normalized = target_dir.replace('\\', '/')
+    parts = target_dir_normalized.split('/')
+    folder_type = parts[0]  # e.g., "loras"
+    subpath = '/'.join(parts[1:]) if len(parts) > 1 else ''  # e.g., "qwen-image-lightning"
+
+    # Build the full relative filename as ComfyUI sees it
+    if subpath:
+        relative_filename = f"{subpath}/{filename}"
+    else:
+        relative_filename = filename
+
     # Get list of directories to check (including equivalent ones)
-    dirs_to_check = [target_dir]
-    if target_dir in EQUIVALENT_DIRECTORIES:
-        dirs_to_check = EQUIVALENT_DIRECTORIES[target_dir]
+    dirs_to_check = [folder_type]
+    if folder_type in EQUIVALENT_DIRECTORIES:
+        dirs_to_check = EQUIVALENT_DIRECTORIES[folder_type]
 
     for check_dir in dirs_to_check:
         try:
@@ -1094,27 +1369,43 @@ def check_model_exists(target_dir, filename):
             # This respects extra_model_paths.yaml and subdirectory structure
             available_files = folder_paths.get_filename_list(check_dir)
 
-            # Check if the exact filename is in the list
-            # ComfyUI returns files with relative paths like "subfolder/file.safetensors"
-            # We only match exact paths - if workflow says "model.safetensors" but file is at
-            # "subfolder/model.safetensors", it won't work in ComfyUI either
-            if filename in available_files:
-                # Found it - get the full path to check size
-                full_path = folder_paths.get_full_path(check_dir, filename)
-                if full_path and os.path.exists(full_path):
-                    try:
-                        size_bytes = os.path.getsize(full_path)
-                        size_mb = size_bytes / (1024 * 1024)
-                        if size_mb >= 1024:
-                            return True, f"{size_mb/1024:.2f} GB"
-                        else:
-                            return True, f"{size_mb:.1f} MB"
-                    except:
-                        return True, None
+            # Check both the relative filename (with subpath) and just the filename
+            filenames_to_check = [relative_filename, filename]
+            for fname in filenames_to_check:
+                if fname in available_files:
+                    # Found it - get the full path to check size
+                    full_path = folder_paths.get_full_path(check_dir, fname)
+                    if full_path and os.path.exists(full_path):
+                        try:
+                            size_bytes = os.path.getsize(full_path)
+                            size_mb = size_bytes / (1024 * 1024)
+                            if size_mb >= 1024:
+                                return True, f"{size_mb/1024:.2f} GB"
+                            else:
+                                return True, f"{size_mb:.1f} MB"
+                        except:
+                            return True, None
         except Exception as e:
             # Fallback: folder type might not exist in ComfyUI
             logging.debug(f"[WMD] Could not check {check_dir}: {e}")
             continue
+
+    # Fallback: Also check by direct file path in case ComfyUI cache is stale
+    try:
+        if subpath:
+            direct_path = os.path.join(folder_paths.models_dir, folder_type, subpath, filename)
+        else:
+            direct_path = os.path.join(folder_paths.models_dir, folder_type, filename)
+
+        if os.path.exists(direct_path):
+            size_bytes = os.path.getsize(direct_path)
+            size_mb = size_bytes / (1024 * 1024)
+            if size_mb >= 1024:
+                return True, f"{size_mb/1024:.2f} GB"
+            else:
+                return True, f"{size_mb:.1f} MB"
+    except Exception as e:
+        logging.debug(f"[WMD] Direct path check failed: {e}")
 
     return False, None
 
@@ -1341,6 +1632,17 @@ def scan_workflow_for_models(workflow_json):
             'alternatives': alternatives
         })
 
+        # Save URL to model_metadata.json if found (so Local Browser can see it)
+        if url and not cached_metadata:
+            save_search_metadata(model, {
+                'url': url,
+                'source': url_source or ('workflow' if url else None),
+                'hf_repo': hf_repo or '',
+                'hf_path': hf_path or '',
+                'model_type': model_type,
+                'directory': target_dir
+            })
+
     return models_data
 
 
@@ -1503,6 +1805,18 @@ def save_usage_cache():
 
 # Load cache on module import
 load_usage_cache()
+
+# Initialize max_parallel_downloads from settings
+def _init_parallel_downloads():
+    global max_parallel_downloads
+    try:
+        settings = load_settings()
+        max_parallel_downloads = settings.get('max_parallel_downloads', 3)
+        logging.info(f"[WMD] Max parallel downloads set to: {max_parallel_downloads}")
+    except Exception as e:
+        logging.debug(f"[WMD] Could not load max_parallel_downloads from settings: {e}")
+
+_init_parallel_downloads()
 
 
 def extract_models_from_workflow(workflow_data):
@@ -1830,6 +2144,106 @@ async def search_model_url(request):
         return web.json_response({'error': str(e)}, status=500)
 
 
+@routes.get("/workflow-models/list-workflows")
+async def list_workflows(request):
+    """List all workflow files from default workflow directories"""
+    try:
+        workflows = []
+        seen_paths = set()
+
+        # Default workflow directories
+        workflow_dirs = []
+
+        user_workflows = os.path.join(folder_paths.base_path, 'user', 'default', 'workflows')
+        if os.path.exists(user_workflows):
+            workflow_dirs.append(('user/default/workflows', user_workflows))
+
+        root_workflows = os.path.join(folder_paths.base_path, 'workflows')
+        if os.path.exists(root_workflows):
+            workflow_dirs.append(('workflows', root_workflows))
+
+        # Scan directories
+        for base_name, dir_path in workflow_dirs:
+            for root, dirs, files in os.walk(dir_path):
+                for file in files:
+                    if file.endswith('.json'):
+                        full_path = os.path.join(root, file)
+
+                        # Skip if already seen (deduplicate)
+                        norm_full = os.path.normpath(full_path)
+                        if norm_full in seen_paths:
+                            continue
+                        seen_paths.add(norm_full)
+
+                        rel_path = os.path.relpath(full_path, dir_path)
+                        try:
+                            stat = os.stat(full_path)
+                            workflows.append({
+                                'name': file,
+                                'path': full_path,
+                                'relative_path': rel_path,
+                                'folder': base_name,
+                                'size': stat.st_size,
+                                'modified': stat.st_mtime
+                            })
+                        except Exception as e:
+                            logging.debug(f"[WMD] Error reading workflow stats: {e}")
+
+        # Sort by modified time (newest first)
+        workflows.sort(key=lambda x: x.get('modified', 0), reverse=True)
+
+        return web.json_response({
+            'success': True,
+            'workflows': workflows
+        })
+    except Exception as e:
+        logging.error(f"[WMD] List workflows error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/parse-workflow")
+async def parse_workflow(request):
+    """Parse a workflow file and extract model information with details"""
+    try:
+        data = await request.json()
+        workflow_path = data.get('path')
+
+        if not workflow_path or not os.path.exists(workflow_path):
+            return web.json_response({'error': 'Invalid workflow path'}, status=400)
+
+        # Read and parse workflow
+        with open(workflow_path, 'r', encoding='utf-8') as f:
+            workflow_content = f.read()
+
+        try:
+            workflow_data = json.loads(workflow_content)
+        except:
+            return web.json_response({'error': 'Invalid JSON in workflow file'}, status=400)
+
+        logging.debug(f"[WMD] Parsing workflow: {workflow_path}")
+
+        # Use the same scan_workflow_for_models function as the main Workflow Models tab
+        # This already returns all the data we need including existence check, URLs, and alternatives
+        scanned_models = scan_workflow_for_models(workflow_content)
+
+        # Map node_type to node_class for consistency with frontend
+        models = []
+        for model_info in scanned_models:
+            model_info['node_class'] = model_info.get('node_type', '')
+            models.append(model_info)
+
+        return web.json_response({
+            'success': True,
+            'models': models,
+            'workflow_name': os.path.basename(workflow_path)
+        })
+    except json.JSONDecodeError as e:
+        return web.json_response({'error': f'Invalid JSON: {e}'}, status=400)
+    except Exception as e:
+        logging.error(f"[WMD] Parse workflow error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
 @routes.post("/workflow-models/advanced-search")
 async def advanced_search(request):
     """Search for model URL using Tavily API (advanced search)"""
@@ -1925,6 +2339,385 @@ async def advanced_search(request):
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Advanced search error: {e}")
         return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/search-alternatives")
+async def search_alternatives(request):
+    """Search for model alternatives, sources, and GGUF versions using Tavily API"""
+    try:
+        data = await request.json()
+        search_name = data.get('filename')  # Already extracted filename from frontend
+        original_filename = data.get('original_filename', search_name)  # Full path for caching
+        search_gguf = data.get('search_gguf', False)
+
+        if not search_name:
+            return web.json_response({'error': 'Missing filename'}, status=400)
+
+        logging.info(f"[WMD] Search name: {search_name}, Original: {original_filename}")
+
+        tavily_key = get_tavily_api_key()
+        if not tavily_key:
+            return web.json_response({
+                'success': False,
+                'error': 'Tavily API key not configured'
+            }, status=400)
+
+        # Use tavily package
+        try:
+            from tavily import TavilyClient
+        except ImportError:
+            return web.json_response({
+                'success': False,
+                'error': 'Tavily package not installed. Run: pip install tavily-python'
+            }, status=400)
+
+        client = TavilyClient(tavily_key)
+
+        results = []
+
+        # Single comprehensive search using just the filename (no path)
+        try:
+            response = client.search(
+                query=search_name,
+                search_depth="advanced",
+                max_results=10
+            )
+
+            for r in response.get('results', []):
+                results.append({
+                    'title': r.get('title', ''),
+                    'url': r.get('url', ''),
+                    'content': (r.get('content', '') or '')[:300],
+                    'score': r.get('score', 0)
+                })
+
+            logging.info(f"[WMD] Found {len(results)} results")
+
+        except Exception as e:
+            logging.error(f"[WMD] Tavily search error: {e}")
+            return web.json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+
+        result_data = {
+            'success': True,
+            'results': results,
+            'query': search_name
+        }
+
+        # Cache the results using original filename as key
+        set_tavily_cached_result(original_filename, result_data)
+
+        return web.json_response(result_data)
+
+    except Exception as e:
+        logging.error(f"[WMD] Search alternatives error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+async def fetch_download_url_from_page(url, filename):
+    """Fetch a page and try to find the actual download URL for the filename"""
+    import aiohttp
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as response:
+                if response.status != 200:
+                    return None
+
+                html = await response.text()
+                filename_lower = filename.lower()
+
+                # For HuggingFace blob pages, convert to resolve URL
+                if 'huggingface.co' in url and '/blob/' in url:
+                    download_url = url.replace('/blob/', '/resolve/')
+                    return download_url
+
+                # For HuggingFace tree pages, look for the file link
+                if 'huggingface.co' in url and '/tree/' in url:
+                    import re
+                    # Look for links containing the filename
+                    pattern = rf'href="([^"]*{re.escape(filename)}[^"]*)"'
+                    matches = re.findall(pattern, html, re.IGNORECASE)
+                    for match in matches:
+                        if '/blob/' in match or '/resolve/' in match:
+                            full_url = match if match.startswith('http') else f"https://huggingface.co{match}"
+                            return full_url.replace('/blob/', '/resolve/')
+
+                # For CivitAI model pages, try to find download link
+                if 'civitai.com' in url:
+                    import re
+                    # Look for model version ID
+                    version_match = re.search(r'modelVersionId[=:](\d+)', html)
+                    if version_match:
+                        version_id = version_match.group(1)
+                        return f"https://civitai.com/api/download/models/{version_id}"
+
+                    # Look for download button/link
+                    download_match = re.search(r'href="(/api/download/models/\d+[^"]*)"', html)
+                    if download_match:
+                        return f"https://civitai.com{download_match.group(1)}"
+
+                # For GitHub releases, look for asset links
+                if 'github.com' in url and '/releases/' in url:
+                    import re
+                    pattern = rf'href="([^"]*releases/download[^"]*{re.escape(filename)}[^"]*)"'
+                    matches = re.findall(pattern, html, re.IGNORECASE)
+                    if matches:
+                        match = matches[0]
+                        return match if match.startswith('http') else f"https://github.com{match}"
+
+    except Exception as e:
+        logging.error(f"[WMD] Error fetching page {url}: {e}")
+
+    return None
+
+
+@routes.post("/workflow-models/extract-source")
+async def extract_source_from_results(request):
+    """Extract the best download source from search results and update model metadata"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')  # The model filename (just name, no path)
+        original_filename = data.get('original_filename', filename)  # Full path for metadata key
+        results = data.get('results', [])
+        model_type = data.get('model_type', 'unknown')
+        directory = data.get('directory', '')
+
+        if not filename or not results:
+            return web.json_response({'success': False, 'error': 'Missing filename or results'}, status=400)
+
+        logging.info(f"[WMD] Extracting source for: {filename} from {len(results)} results")
+
+        best_source = None
+        best_score = 0
+        filename_lower = filename.lower()
+        filename_base = filename.rsplit('.', 1)[0].lower()  # Remove extension
+
+        for result in results:
+            url = result.get('url', '')
+            title = result.get('title', '')
+            content = result.get('content', '')
+            score = 0
+
+            # Skip non-relevant URLs
+            if not url:
+                continue
+
+            url_lower = url.lower()
+            url_decoded = urllib.parse.unquote(url_lower)
+
+            # HIGHEST PRIORITY: Exact filename in URL (direct download link)
+            if filename_lower in url_decoded or filename_lower in url_lower:
+                score += 200  # Very high score for exact match
+                logging.info(f"[WMD] Exact filename match in URL: {url} (+200)")
+            elif filename_base in url_decoded or filename_base in url_lower:
+                score += 150  # High score for base name match
+                logging.info(f"[WMD] Base filename match in URL: {url} (+150)")
+
+            # Check if URL ends with the filename (strongest indicator of direct link)
+            if url_decoded.endswith(filename_lower) or url_lower.endswith(filename_lower):
+                score += 100
+                logging.info(f"[WMD] URL ends with filename: {url} (+100)")
+
+            # Prioritize known model hosting sites
+            if 'huggingface.co' in url_lower:
+                score += 30
+                if '/resolve/' in url_lower:
+                    score += 50  # Direct download link
+                elif '/blob/' in url_lower:
+                    score += 40  # File viewer (can convert to download)
+                elif '/tree/' in url_lower:
+                    score += 10  # Directory listing
+            elif 'civitai.com' in url_lower:
+                score += 25
+                if '/models/' in url_lower:
+                    score += 20
+                if 'modelVersionId' in url_lower or '/api/' in url_lower:
+                    score += 30  # API/download link
+            elif 'github.com' in url_lower:
+                score += 15
+                if '/releases/' in url_lower:
+                    score += 25
+
+            # Filename in content is a weak signal
+            if filename_lower in (content or '').lower():
+                score += 10
+
+            # Penalize non-download pages
+            if '/discussions/' in url_lower or '/issues/' in url_lower:
+                score -= 50
+            if '/wiki/' in url_lower or '/readme' in url_lower:
+                score -= 30
+            if 'reddit.com' in url_lower or 'twitter.com' in url_lower or 'x.com' in url_lower:
+                score -= 100
+            if 'youtube.com' in url_lower or 'medium.com' in url_lower:
+                score -= 80
+
+            logging.info(f"[WMD] Score for {url[:80]}...: {score}")
+
+            if score > best_score:
+                best_score = score
+                best_source = {
+                    'url': url,
+                    'title': title,
+                    'score': score
+                }
+
+        if not best_source or best_score < 30:
+            return web.json_response({
+                'success': False,
+                'message': 'No reliable source found in results'
+            })
+
+        # Extract metadata from the best source URL
+        url = best_source['url']
+
+        # Try to fetch the actual download URL from the page
+        logging.info(f"[WMD] Visiting page to extract download URL: {url}")
+        actual_download_url = await fetch_download_url_from_page(url, filename)
+        if actual_download_url:
+            logging.info(f"[WMD] Found actual download URL: {actual_download_url}")
+            url = actual_download_url
+
+        metadata = {
+            'url': url,
+            'source': 'tavily_search',
+            'model_type': model_type,
+            'directory': directory,
+            'filename': filename,
+            'search_score': best_score,
+            'original_search_url': best_source['url']  # Keep track of original
+        }
+
+        # Parse HuggingFace URLs
+        if 'huggingface.co' in url:
+            # https://huggingface.co/owner/repo/resolve/main/path/to/file.safetensors
+            # https://huggingface.co/owner/repo/blob/main/path/to/file.safetensors
+            import re
+            hf_match = re.search(r'huggingface\.co/([^/]+/[^/]+)(?:/(?:resolve|blob)/[^/]+)?(?:/(.+))?', url)
+            if hf_match:
+                metadata['hf_repo'] = hf_match.group(1)
+                if hf_match.group(2):
+                    metadata['hf_path'] = hf_match.group(2)
+                # Construct direct download URL
+                if metadata.get('hf_path'):
+                    metadata['url'] = f"https://huggingface.co/{metadata['hf_repo']}/resolve/main/{metadata['hf_path']}"
+                else:
+                    # Try to construct URL with filename
+                    metadata['url'] = f"https://huggingface.co/{metadata['hf_repo']}/resolve/main/{filename}"
+                    metadata['hf_path'] = filename
+
+        # Parse CivitAI URLs
+        elif 'civitai.com' in url:
+            import re
+            civit_match = re.search(r'civitai\.com/models/(\d+)', url)
+            if civit_match:
+                metadata['civitai_model_id'] = civit_match.group(1)
+                metadata['civitai_url'] = url
+
+        # Save to model metadata
+        save_search_metadata(filename, metadata)
+
+        logging.info(f"[WMD] Extracted source for {filename}: {metadata.get('url')} (score: {best_score})")
+
+        return web.json_response({
+            'success': True,
+            'metadata': metadata,
+            'score': best_score
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Extract source error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/save-model-source")
+async def save_model_source(request):
+    """Manually save a source URL for a model"""
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+        url = data.get('url')
+        model_type = data.get('model_type', 'unknown')
+        directory = data.get('directory', '')
+
+        if not filename or not url:
+            return web.json_response({'success': False, 'error': 'Missing filename or url'}, status=400)
+
+        logging.info(f"[WMD] Saving source for {filename}: {url}")
+
+        metadata = {
+            'url': url,
+            'source': 'manual',
+            'model_type': model_type,
+            'directory': directory,
+            'filename': filename
+        }
+
+        # Parse HuggingFace URLs
+        if 'huggingface.co' in url:
+            import re
+            hf_match = re.search(r'huggingface\.co/([^/]+/[^/]+)(?:/(?:resolve|blob)/[^/]+)?(?:/(.+))?', url)
+            if hf_match:
+                metadata['hf_repo'] = hf_match.group(1)
+                if hf_match.group(2):
+                    metadata['hf_path'] = hf_match.group(2)
+                # Construct direct download URL
+                if '/blob/' in url:
+                    metadata['url'] = url.replace('/blob/', '/resolve/')
+
+        # Parse CivitAI URLs
+        elif 'civitai.com' in url:
+            import re
+            civit_match = re.search(r'civitai\.com/models/(\d+)', url)
+            if civit_match:
+                metadata['civitai_model_id'] = civit_match.group(1)
+                metadata['civitai_url'] = url
+
+        # Save to model metadata
+        save_search_metadata(filename, metadata)
+
+        return web.json_response({
+            'success': True,
+            'metadata': metadata
+        })
+
+    except Exception as e:
+        logging.error(f"[WMD] Save source error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/tavily-cache/{filename}")
+async def get_tavily_cache(request):
+    """Get cached Tavily search results for a filename"""
+    try:
+        filename = request.match_info['filename']
+        filename = urllib.parse.unquote(filename)
+
+        cached = get_tavily_cached_result(filename)
+        if cached:
+            return web.json_response(cached)
+        else:
+            return web.json_response({
+                'success': False,
+                'message': 'No cached results'
+            })
+
+    except Exception as e:
+        logging.error(f"[WMD] Get Tavily cache error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/tavily-cache-all")
+async def get_tavily_cache_all(request):
+    """Get all cached Tavily search results"""
+    global _tavily_cache
+    return web.json_response({
+        'success': True,
+        'cache': _tavily_cache
+    })
 
 
 @routes.get("/workflow-models/search-cache/{filename}")
@@ -2148,6 +2941,44 @@ async def cancel_download(request):
             return web.json_response({'error': 'Download not found'}, status=404)
 
 
+@routes.get("/workflow-models/download-history")
+async def get_download_history_endpoint(request):
+    """Get download history"""
+    global download_history
+    if not download_history:
+        load_download_history()
+    return web.json_response({
+        'success': True,
+        'history': download_history
+    })
+
+
+@routes.post("/workflow-models/clear-download-history")
+async def clear_download_history_endpoint(request):
+    """Clear download history"""
+    clear_download_history()
+    return web.json_response({
+        'success': True,
+        'message': 'Download history cleared'
+    })
+
+
+@routes.post("/workflow-models/delete-history-item")
+async def delete_history_item_endpoint(request):
+    """Delete a single item from download history"""
+    global download_history
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+        if filename:
+            download_history = [h for h in download_history if h.get('filename') != filename]
+            save_download_history()
+            return web.json_response({'success': True})
+        return web.json_response({'error': 'Missing filename'}, status=400)
+    except Exception as e:
+        return web.json_response({'error': str(e)}, status=500)
+
+
 def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
     """Background thread to download a model"""
     try:
@@ -2226,9 +3057,32 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
             download_progress[download_id]['status'] = 'completed'
             download_progress[download_id]['progress'] = 100
 
-        # Cache the URL for future use
+        # Save to model_metadata.json (single source of truth)
         hf_url = f"https://huggingface.co/{hf_repo}/resolve/main/{hf_path}"
-        _cache_download_url(filename, hf_url, 'huggingface', hf_repo=hf_repo, hf_path=hf_path)
+        metadata = load_model_metadata()
+        metadata[filename] = {
+            'filename': filename,
+            'url': hf_url,
+            'url_source': 'download',
+            'source': 'huggingface',
+            'hf_repo': hf_repo,
+            'hf_path': hf_path,
+            'type': target_dir,
+            'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+        }
+        save_model_metadata(metadata)
+
+        # Also keep in download history for UI
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'completed',
+            'total_size': download_progress.get(download_id, {}).get('total_size', 0),
+            'directory': target_dir,
+            'url': hf_url,
+            'hf_repo': hf_repo,
+            'hf_path': hf_path
+        })
 
         logging.info(f"[Workflow-Models-Downloader] Downloaded: {filename}")
 
@@ -2247,11 +3101,27 @@ def _download_model_thread(download_id, hf_repo, hf_path, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = error_msg
+        # Add to download history
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'error',
+            'error': error_msg,
+            'directory': target_dir
+        })
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] Download error: {e}")
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = str(e)
+        # Add to download history
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'error',
+            'error': str(e),
+            'directory': target_dir
+        })
     finally:
         # Clean up cancelled flag
         cancelled_downloads.discard(download_id)
@@ -2334,10 +3204,42 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
             download_progress[download_id]['status'] = 'completed'
             download_progress[download_id]['progress'] = 100
 
-        # Cache the URL for future use
+        # Save to model_metadata.json (single source of truth)
+        clean_url = url.split('?')[0] if 'civitai.com' in url else url
         source = 'civitai' if 'civitai.com' in url else ('huggingface' if 'huggingface.co' in url else 'direct')
         hf_repo, hf_path = extract_huggingface_info(url)
-        _cache_download_url(filename, url, source, hf_repo=hf_repo, hf_path=hf_path)
+
+        metadata = load_model_metadata()
+        entry = {
+            'filename': filename,
+            'url': clean_url,
+            'url_source': 'download',
+            'source': source,
+            'type': target_dir,
+            'downloaded_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+        }
+        if hf_repo:
+            entry['hf_repo'] = hf_repo
+            entry['hf_path'] = hf_path
+        if 'civitai.com' in url:
+            # Try to extract model ID
+            import re
+            match = re.search(r'/models/(\d+)', url)
+            if match:
+                entry['civitai_model_id'] = match.group(1)
+        metadata[filename] = entry
+        save_model_metadata(metadata)
+
+        # Also keep in download history for UI
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'completed',
+            'total_size': download_progress.get(download_id, {}).get('total_size', 0),
+            'directory': target_dir,
+            'url': clean_url,
+            'source': source
+        })
 
         logging.info(f"[Workflow-Models-Downloader] Downloaded from URL: {filename}")
 
@@ -2358,20 +3260,46 @@ def _download_from_url_thread(download_id, url, filename, target_dir):
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = error_msg
+        # Add to download history
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'error',
+            'error': error_msg,
+            'directory': target_dir
+        })
     except Exception as e:
         logging.error(f"[Workflow-Models-Downloader] URL download error: {e}")
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = str(e)
+        # Add to download history
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'error',
+            'error': str(e),
+            'directory': target_dir
+        })
     finally:
         # Clean up cancelled flag
         cancelled_downloads.discard(download_id)
 
 
 @routes.get("/workflow-models/version")
-async def get_version(request):
-    """Get extension version"""
-    return web.Response(text="1.8.1")
+async def get_version_endpoint(request):
+    """Get extension version and check for updates"""
+    installed = get_installed_version()
+    latest = get_latest_version()
+    update_available = compare_versions(installed, latest)
+
+    return web.json_response({
+        'installed': installed,
+        'latest': latest,
+        'update_available': update_available,
+        'github_url': f"https://github.com/{GITHUB_REPO}",
+        'registry_url': REGISTRY_URL
+    })
 
 
 @routes.get("/workflow-models/settings")
@@ -2387,7 +3315,8 @@ async def get_settings(request):
             'huggingface_token_set': bool(settings.get('huggingface_token', '')),
             'civitai_api_key_set': bool(settings.get('civitai_api_key', '')),
             'tavily_api_key_set': bool(settings.get('tavily_api_key', '')),
-            'enable_advanced_search': settings.get('enable_advanced_search', False)
+            'enable_advanced_search': settings.get('enable_advanced_search', False),
+            'max_parallel_downloads': settings.get('max_parallel_downloads', 3)
         }
         return web.json_response(masked)
     except Exception as e:
@@ -2427,6 +3356,16 @@ async def update_settings(request):
         if 'enable_advanced_search' in data:
             current['enable_advanced_search'] = bool(data['enable_advanced_search'])
 
+        if 'max_parallel_downloads' in data:
+            try:
+                val = int(data['max_parallel_downloads'])
+                current['max_parallel_downloads'] = max(1, min(10, val))  # Clamp between 1-10
+                # Update the global variable too
+                global max_parallel_downloads
+                max_parallel_downloads = current['max_parallel_downloads']
+            except (ValueError, TypeError):
+                pass
+
         if save_settings(current):
             return web.json_response({'success': True})
         else:
@@ -2459,6 +3398,836 @@ def format_size(size_bytes):
         return f"{size_bytes / (1024 * 1024):.1f} MB"
     else:
         return f"{size_bytes / (1024 * 1024 * 1024):.2f} GB"
+
+
+# ============================================================================
+# Node Metadata Database (Second Master - Single Source of Truth for Nodes)
+# ============================================================================
+# Hybrid approach:
+# 1. Bulk fetch from ComfyUI Registry during scan
+# 2. Dynamic lookup as fallback for unknown nodes
+# 3. Also imports from ComfyUI Manager's extension-node-map.json
+
+NODE_METADATA_FILE = os.path.join(os.path.dirname(__file__), "node_metadata.json")
+_node_metadata_cache = None
+
+# ComfyUI Registry API endpoints
+COMFY_REGISTRY_API = "https://api.comfy.org"
+COMFY_REGISTRY_LIST_NODES = f"{COMFY_REGISTRY_API}/comfy-nodes"
+COMFY_REGISTRY_GET_NODE = f"{COMFY_REGISTRY_API}/comfy-nodes/{{node_name}}/node"
+
+
+def load_node_metadata():
+    """Load the node metadata database"""
+    global _node_metadata_cache
+    if _node_metadata_cache is not None:
+        return _node_metadata_cache
+    try:
+        if os.path.exists(NODE_METADATA_FILE):
+            with open(NODE_METADATA_FILE, 'r', encoding='utf-8') as f:
+                _node_metadata_cache = json.load(f)
+                return _node_metadata_cache
+    except Exception as e:
+        logging.error(f"[WMD] Error loading node metadata: {e}")
+    _node_metadata_cache = {}
+    return _node_metadata_cache
+
+
+def save_node_metadata(metadata):
+    """Save the node metadata database"""
+    global _node_metadata_cache
+    try:
+        with open(NODE_METADATA_FILE, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+        _node_metadata_cache = metadata
+        return True
+    except Exception as e:
+        logging.error(f"[WMD] Error saving node metadata: {e}")
+        return False
+
+
+def get_node_info(node_type):
+    """Get metadata for a node type from local database"""
+    metadata = load_node_metadata()
+    return metadata.get(node_type)
+
+
+def fetch_node_from_registry(node_name):
+    """Dynamic lookup: Fetch single node info from ComfyUI Registry API"""
+    try:
+        url = COMFY_REGISTRY_GET_NODE.format(node_name=node_name)
+        response = requests.get(url, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                'node_type': node_name,
+                'name': data.get('name'),
+                'description': data.get('description'),
+                'author': data.get('author'),
+                'repository': data.get('repository'),
+                'license': data.get('license'),
+                'category': data.get('category'),
+                'downloads': data.get('downloads'),
+                'rating': data.get('rating'),
+                'latest_version': data.get('latest_version', {}).get('version') if data.get('latest_version') else None,
+                'source': 'comfy_registry',
+                'fetched_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+            }
+        elif response.status_code == 404:
+            return None
+    except Exception as e:
+        logging.debug(f"[WMD] Registry lookup failed for {node_name}: {e}")
+    return None
+
+
+def fetch_bulk_nodes_from_registry(page=1, page_size=100):
+    """Bulk fetch: Get paginated list of nodes from ComfyUI Registry"""
+    try:
+        url = f"{COMFY_REGISTRY_LIST_NODES}?page={page}&pageSize={page_size}"
+        response = requests.get(url, timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('comfy_nodes', []), data.get('total', 0)
+    except Exception as e:
+        logging.error(f"[WMD] Registry bulk fetch failed: {e}")
+    return [], 0
+
+
+@routes.post("/workflow-models/scan-node-metadata")
+async def scan_node_metadata(request):
+    """Scan and build node metadata from multiple sources:
+    1. ComfyUI Registry API (bulk fetch)
+    2. ComfyUI Manager's extension-node-map.json
+    """
+    try:
+        data = await request.json() if request.body_exists else {}
+        force_rescan = data.get('force', False)
+        include_registry = data.get('include_registry', True)
+
+        # Load existing metadata
+        existing_metadata = load_node_metadata()
+        new_metadata = dict(existing_metadata) if not force_rescan else {}
+
+        from_registry = 0
+        from_extension_map = 0
+        updated = 0
+
+        # Source 1: ComfyUI Registry API (bulk fetch with pagination)
+        if include_registry:
+            logging.info("[WMD] Fetching nodes from ComfyUI Registry...")
+            page = 1
+            page_size = 100
+            total_fetched = 0
+
+            while True:
+                nodes, total = fetch_bulk_nodes_from_registry(page, page_size)
+                if not nodes:
+                    break
+
+                for node in nodes:
+                    node_name = node.get('comfy_node_name')
+                    if not node_name:
+                        continue
+
+                    # Skip if already exists with better data (unless force)
+                    if not force_rescan and node_name in existing_metadata:
+                        existing = existing_metadata[node_name]
+                        # Keep existing if it has more info
+                        if existing.get('github_url') or existing.get('repository'):
+                            new_metadata[node_name] = existing
+                            continue
+
+                    entry = {
+                        'node_type': node_name,
+                        'category': node.get('category'),
+                        'description': node.get('description'),
+                        'function': node.get('function'),
+                        'input_types': node.get('input_types'),
+                        'return_types': node.get('return_types'),
+                        'deprecated': node.get('deprecated', False),
+                        'experimental': node.get('experimental', False),
+                        'source': 'comfy_registry',
+                        'scanned_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+                    }
+
+                    new_metadata[node_name] = entry
+                    from_registry += 1
+                    total_fetched += 1
+
+                # Check if we've fetched all
+                if total_fetched >= total or len(nodes) < page_size:
+                    break
+                page += 1
+
+            logging.info(f"[WMD] Fetched {from_registry} nodes from ComfyUI Registry")
+
+        # Source 2: ComfyUI Manager's extension-node-map.json (adds GitHub URLs)
+        logging.info("[WMD] Importing from extension-node-map.json...")
+        extension_map = load_extension_node_map()
+
+        for github_url, node_data in extension_map.items():
+            if not isinstance(node_data, list) or len(node_data) < 1:
+                continue
+
+            # First element is list of node types
+            node_list = node_data[0] if isinstance(node_data[0], list) else []
+
+            # Second element might be extension info
+            extension_info = node_data[1] if len(node_data) > 1 else {}
+            extension_name = extension_info.get('title', '') if isinstance(extension_info, dict) else ''
+
+            for node_type in node_list:
+                if not node_type:
+                    continue
+
+                # Get or create entry
+                entry = new_metadata.get(node_type, {'node_type': node_type})
+
+                # Add/update GitHub info
+                entry['github_url'] = github_url
+                entry['extension_name'] = extension_name
+
+                # Check if installed
+                try:
+                    repo_name = github_url.rstrip('/').split('/')[-1]
+                    custom_nodes_path = os.path.join(folder_paths.base_path, 'custom_nodes', repo_name)
+                    entry['installed'] = os.path.exists(custom_nodes_path)
+                except:
+                    pass
+
+                # Update source if this is new info
+                if entry.get('source') != 'comfy_registry':
+                    entry['source'] = 'extension_node_map'
+                else:
+                    entry['source'] = 'comfy_registry+extension_map'
+
+                entry['scanned_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+
+                if node_type not in new_metadata:
+                    from_extension_map += 1
+                else:
+                    updated += 1
+
+                new_metadata[node_type] = entry
+
+        # Save updated metadata
+        save_node_metadata(new_metadata)
+
+        return web.json_response({
+            'success': True,
+            'from_registry': from_registry,
+            'from_extension_map': from_extension_map,
+            'updated': updated,
+            'total': len(new_metadata)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Scan node metadata error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/node-metadata")
+async def get_all_node_metadata(request):
+    """Get the node metadata database"""
+    try:
+        metadata = load_node_metadata()
+        return web.json_response({
+            'success': True,
+            'metadata': metadata,
+            'count': len(metadata)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Get node metadata error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/node-info")
+async def get_node_info_endpoint(request):
+    """Get metadata for a specific node type with dynamic fallback"""
+    try:
+        node_type = request.query.get('node_type', '')
+        if not node_type:
+            return web.json_response({'error': 'node_type required'}, status=400)
+
+        # 1. Check local database first
+        info = get_node_info(node_type)
+
+        # 2. If not found, try ComfyUI Manager's extension-node-map
+        if not info:
+            github_url = lookup_node_github_url(node_type)
+            if github_url:
+                info = {
+                    'node_type': node_type,
+                    'github_url': github_url,
+                    'source': 'extension_node_map_live'
+                }
+
+        # 3. If still not found, try dynamic lookup from ComfyUI Registry
+        if not info:
+            registry_info = fetch_node_from_registry(node_type)
+            if registry_info:
+                info = registry_info
+                # Save to local database for future lookups
+                metadata = load_node_metadata()
+                metadata[node_type] = info
+                save_node_metadata(metadata)
+
+        return web.json_response({
+            'success': True,
+            'info': info,
+            'found': info is not None
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Get node info error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# ============================================================================
+# Model Metadata Scanner
+# ============================================================================
+# Uses _model_metadata_cache and functions defined earlier in the file
+
+MODEL_METADATA_FILE = os.path.join(os.path.dirname(__file__), "model_metadata.json")
+
+
+def load_model_metadata():
+    """Load the master model metadata file (uses shared cache)"""
+    return _get_model_metadata_safe()
+
+
+def save_model_metadata(metadata):
+    """Save the master model metadata file (uses shared cache)"""
+    return _save_model_metadata_safe(metadata)
+
+
+def extract_safetensors_metadata(file_path):
+    """Extract metadata from a safetensors file header"""
+    try:
+        with open(file_path, 'rb') as f:
+            # Read header size (first 8 bytes, little-endian)
+            header_size_bytes = f.read(8)
+            if len(header_size_bytes) < 8:
+                return None
+            header_size = int.from_bytes(header_size_bytes, 'little')
+
+            # Sanity check - header shouldn't be too large
+            if header_size > 10 * 1024 * 1024:  # 10MB max
+                return None
+
+            # Read header JSON
+            header_json = f.read(header_size)
+            header = json.loads(header_json.decode('utf-8'))
+
+            # Extract __metadata__ section if present
+            metadata = header.get('__metadata__', {})
+            return metadata
+    except Exception as e:
+        logging.debug(f"[WMD] Error reading safetensors metadata from {file_path}: {e}")
+        return None
+
+
+def extract_model_info_from_metadata(metadata, filename):
+    """Extract useful info (URLs, source, etc.) from safetensors metadata"""
+    if not metadata:
+        return None
+
+    info = {
+        'filename': filename,
+        'source': None,
+        'url': None,
+        'model_name': None,
+        'base_model': None,
+        'description': None,
+        'civitai_model_id': None,
+        'civitai_version_id': None,
+        'hf_repo': None,
+    }
+
+    # Check for CivitAI metadata
+    if 'modelId' in metadata or 'ss_civitai_model_id' in metadata:
+        model_id = metadata.get('modelId') or metadata.get('ss_civitai_model_id')
+        version_id = metadata.get('versionId') or metadata.get('ss_civitai_version_id')
+        if model_id:
+            info['civitai_model_id'] = str(model_id)
+            info['source'] = 'civitai'
+            if version_id:
+                info['civitai_version_id'] = str(version_id)
+                info['url'] = f"https://civitai.com/models/{model_id}?modelVersionId={version_id}"
+            else:
+                info['url'] = f"https://civitai.com/models/{model_id}"
+
+    # Check for HuggingFace metadata
+    if 'hf_repo' in metadata or 'ss_hf_repo' in metadata:
+        hf_repo = metadata.get('hf_repo') or metadata.get('ss_hf_repo')
+        if hf_repo:
+            info['hf_repo'] = hf_repo
+            info['source'] = 'huggingface'
+            info['url'] = f"https://huggingface.co/{hf_repo}"
+
+    # Check for direct URL in metadata
+    if 'ss_model_url' in metadata:
+        info['url'] = metadata['ss_model_url']
+    elif 'model_url' in metadata:
+        info['url'] = metadata['model_url']
+    elif 'source_url' in metadata:
+        info['url'] = metadata['source_url']
+
+    # Extract model name
+    info['model_name'] = (
+        metadata.get('ss_output_name') or
+        metadata.get('ss_sd_model_name') or
+        metadata.get('model_name') or
+        metadata.get('name')
+    )
+
+    # Extract base model info
+    info['base_model'] = (
+        metadata.get('ss_base_model_version') or
+        metadata.get('ss_sd_model_hash') or
+        metadata.get('base_model')
+    )
+
+    # Extract description
+    info['description'] = metadata.get('description') or metadata.get('ss_training_comment')
+
+    # Only return if we found something useful
+    if info['url'] or info['model_name'] or info['civitai_model_id'] or info['hf_repo']:
+        return info
+    return None
+
+
+@routes.post("/workflow-models/find-model-url")
+async def find_and_save_model_url(request):
+    """Search for model URL using HuggingFace and CivitAI APIs, save to metadata.
+
+    Search order:
+    1. HuggingFace API
+    2. CivitAI API (fallback)
+    """
+    try:
+        data = await request.json()
+        filename = data.get('filename')
+
+        if not filename:
+            return web.json_response({'error': 'filename required'}, status=400)
+
+        basename = os.path.basename(filename)
+
+        # Check if already has URL in metadata
+        metadata = load_model_metadata()
+        existing = metadata.get(basename, {})
+        if existing.get('url') or existing.get('user_url'):
+            return web.json_response({
+                'success': True,
+                'url': existing.get('url') or existing.get('user_url'),
+                'source': existing.get('url_source', 'existing'),
+                'already_found': True
+            })
+
+        # Search APIs (HuggingFace first, then CivitAI)
+        url, source = find_model_url(basename, search_apis=True)
+
+        if url:
+            # Save to model_metadata.json
+            entry = metadata.get(basename, {'filename': basename})
+            entry['url'] = url
+            entry['url_source'] = source
+            entry['searched_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+
+            # Extract additional info from URL
+            if 'huggingface.co' in url:
+                entry['source'] = 'huggingface'
+                hf_repo, hf_path = extract_huggingface_info(url)
+                if hf_repo:
+                    entry['hf_repo'] = hf_repo
+                    entry['hf_path'] = hf_path
+            elif 'civitai.com' in url:
+                entry['source'] = 'civitai'
+                import re
+                match = re.search(r'/models/(\d+)', url)
+                if match:
+                    entry['civitai_model_id'] = match.group(1)
+
+            metadata[basename] = entry
+            save_model_metadata(metadata)
+
+            return web.json_response({
+                'success': True,
+                'url': url,
+                'source': source,
+                'saved': True
+            })
+        else:
+            return web.json_response({
+                'success': False,
+                'message': 'No URL found on HuggingFace or CivitAI'
+            })
+    except Exception as e:
+        logging.error(f"[WMD] Find model URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/scan-model-metadata")
+async def scan_model_metadata(request):
+    """Scan all installed models and build comprehensive metadata database.
+
+    Sources (in priority order for URLs):
+    1. User-provided URLs (preserved, never overwritten)
+    2. Safetensors embedded metadata
+    3. ComfyUI Manager's model-list.json
+    4. HuggingFace/CivitAI API search (if search_apis=True)
+    """
+    try:
+        data = await request.json() if request.body_exists else {}
+        force_rescan = data.get('force', False)
+
+        # Load existing metadata
+        existing_metadata = load_model_metadata()
+        new_metadata = dict(existing_metadata) if not force_rescan else {}
+
+        scanned = 0
+        updated = 0
+        from_safetensors = 0
+        from_model_list = 0
+        errors = 0
+
+        # Valid model file extensions
+        MODEL_EXTENSIONS = {'.safetensors', '.ckpt', '.pt', '.pth', '.bin', '.onnx'}
+
+        # Known model folder types
+        model_types = set([
+            'checkpoints', 'loras', 'vae', 'controlnet', 'clip', 'clip_vision',
+            'text_encoders', 'diffusion_models', 'unet', 'embeddings',
+            'upscale_models', 'hypernetworks', 'gligen', 'style_models',
+            'ipadapter', 'instantid', 'photomaker', 'pulid'
+        ])
+
+        # Add custom folder types from folder_paths
+        if hasattr(folder_paths, 'folder_names_and_paths'):
+            for folder_type in folder_paths.folder_names_and_paths.keys():
+                if folder_type.lower() not in ['custom_nodes', 'configs', 'fonts', 'web', 'js', 'user', 'input', 'output', 'temp', 'models', 'pycache']:
+                    model_types.add(folder_type)
+
+        for folder_type in model_types:
+            try:
+                files = folder_paths.get_filename_list(folder_type)
+
+                for filename in files:
+                    ext = os.path.splitext(filename)[1].lower()
+                    if ext not in MODEL_EXTENSIONS:
+                        continue
+
+                    basename = os.path.basename(filename)
+
+                    # Get existing entry (preserve user data)
+                    existing_entry = existing_metadata.get(basename, {})
+                    user_url = existing_entry.get('user_url')  # Preserve user-provided URL
+
+                    # Skip if already has complete data (unless force)
+                    if not force_rescan and basename in existing_metadata:
+                        entry = existing_metadata[basename]
+                        if entry.get('url') or entry.get('user_url'):
+                            new_metadata[basename] = entry
+                            continue
+
+                    try:
+                        full_path = folder_paths.get_full_path(folder_type, filename)
+                        if not full_path or not os.path.exists(full_path):
+                            continue
+
+                        scanned += 1
+
+                        # Start with basic info
+                        info = {
+                            'filename': basename,
+                            'type': folder_type,
+                            'path': full_path,
+                            'scanned_at': time.strftime('%Y-%m-%dT%H:%M:%S')
+                        }
+
+                        # Preserve user-provided URL (highest priority)
+                        if user_url:
+                            info['user_url'] = user_url
+
+                        # Source 1: Try to extract from safetensors metadata
+                        if ext == '.safetensors':
+                            st_metadata = extract_safetensors_metadata(full_path)
+                            if st_metadata:
+                                st_info = extract_model_info_from_metadata(st_metadata, basename)
+                                if st_info:
+                                    # Merge safetensors info
+                                    for key in ['url', 'source', 'model_name', 'base_model', 'description',
+                                                'civitai_model_id', 'civitai_version_id', 'hf_repo']:
+                                        if st_info.get(key):
+                                            info[key] = st_info[key]
+                                    info['url_source'] = 'safetensors_metadata'
+                                    from_safetensors += 1
+
+                        # Source 2: If no URL yet, check ComfyUI Manager's model-list.json
+                        if not info.get('url'):
+                            ml_type, ml_dir, ml_url, ml_size = lookup_model_in_model_list(basename)
+                            if ml_url:
+                                info['url'] = ml_url
+                                info['url_source'] = 'model_list'
+                                from_model_list += 1
+                                # Determine source from URL
+                                if 'huggingface.co' in ml_url:
+                                    info['source'] = 'huggingface'
+                                    hf_repo, hf_path = extract_huggingface_info(ml_url)
+                                    if hf_repo:
+                                        info['hf_repo'] = hf_repo
+                                elif 'civitai.com' in ml_url:
+                                    info['source'] = 'civitai'
+
+                        # Only save if we found something useful
+                        if info.get('url') or info.get('user_url') or info.get('model_name'):
+                            new_metadata[basename] = info
+                            updated += 1
+                        else:
+                            # Still save basic info so we know we scanned it
+                            new_metadata[basename] = info
+
+                    except Exception as e:
+                        errors += 1
+                        logging.debug(f"[WMD] Error scanning {filename}: {e}")
+            except Exception as e:
+                logging.debug(f"[WMD] Error scanning folder {folder_type}: {e}")
+
+        # Save updated metadata
+        save_model_metadata(new_metadata)
+
+        return web.json_response({
+            'success': True,
+            'scanned': scanned,
+            'updated': updated,
+            'from_safetensors': from_safetensors,
+            'from_model_list': from_model_list,
+            'errors': errors,
+            'total': len(new_metadata)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Scan metadata error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/model-metadata")
+async def get_all_model_metadata(request):
+    """Get the master model metadata"""
+    try:
+        metadata = load_model_metadata()
+        return web.json_response({
+            'success': True,
+            'metadata': metadata,
+            'count': len(metadata)
+        })
+    except Exception as e:
+        logging.error(f"[WMD] Get metadata error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+# DEPRECATED: user_model_urls.json - user URLs now stored in model_metadata.json
+
+
+@routes.get("/workflow-models/model-url")
+async def get_model_url(request):
+    """Get URL info for a model from model_metadata.json (single source of truth)"""
+    try:
+        filename = request.query.get('filename', '')
+        if not filename:
+            return web.json_response({'error': 'Filename required'}, status=400)
+
+        basename = os.path.basename(filename)
+        result = {
+            'filename': filename,
+            'url': None,
+            'user_url': None,
+            'source': None,
+            'model_name': None,
+            'base_model': None
+        }
+
+        # Check model_metadata.json (single source of truth)
+        model_metadata = load_model_metadata()
+
+        # Try multiple matching strategies
+        meta = None
+        # 1. Exact match with full filename
+        if filename in model_metadata:
+            meta = model_metadata[filename]
+        # 2. Match by basename
+        elif basename in model_metadata:
+            meta = model_metadata[basename]
+        # 3. Try case-insensitive match
+        else:
+            filename_lower = basename.lower()
+            for key in model_metadata:
+                if key.lower() == filename_lower or os.path.basename(key).lower() == filename_lower:
+                    meta = model_metadata[key]
+                    break
+
+        if meta:
+            result['url'] = meta.get('url')
+            result['user_url'] = meta.get('user_url')
+            result['source'] = meta.get('url_source') or meta.get('source')
+            result['model_name'] = meta.get('model_name')
+            result['base_model'] = meta.get('base_model')
+            result['hf_repo'] = meta.get('hf_repo')
+            result['civitai_model_id'] = meta.get('civitai_model_id')
+            result['description'] = meta.get('description')
+            result['model_type'] = meta.get('model_type') or meta.get('type')
+            result['directory'] = meta.get('directory')
+            result['note'] = meta.get('note')
+            result['found_in_metadata'] = True
+            result['metadata_source'] = 'runtime_cache'
+        else:
+            # Check popular-models.json (curated list)
+            popular_models = load_popular_models()
+            popular_meta = popular_models.get(basename)
+            if not popular_meta:
+                # Try case-insensitive match
+                for key, val in popular_models.items():
+                    if key.lower() == basename.lower():
+                        popular_meta = val
+                        break
+
+            if popular_meta:
+                result['url'] = popular_meta.get('url')
+                result['source'] = 'popular_models'
+                result['model_type'] = popular_meta.get('type')
+                result['directory'] = popular_meta.get('directory')
+                result['note'] = popular_meta.get('note')
+                result['found_in_metadata'] = True
+                result['metadata_source'] = 'popular_models'
+            else:
+                # Check model-list.json (ComfyUI Manager)
+                model_list = load_model_list()
+                model_list_meta = None
+                for model_info in model_list:
+                    model_filename = model_info.get('filename', '')
+                    if model_filename.lower() == basename.lower():
+                        model_list_meta = model_info
+                        break
+
+                if model_list_meta:
+                    result['url'] = model_list_meta.get('url')
+                    result['source'] = 'model_list'
+                    result['model_type'] = model_list_meta.get('type')
+                    result['model_name'] = model_list_meta.get('name')
+                    result['base_model'] = model_list_meta.get('base')
+                    result['description'] = model_list_meta.get('description')
+                    result['found_in_metadata'] = True
+                    result['metadata_source'] = 'model_list'
+                else:
+                    result['found_in_metadata'] = False
+                    result['metadata_count'] = len(model_metadata)
+
+        return web.json_response(result)
+    except Exception as e:
+        logging.error(f"[WMD] Get model URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.post("/workflow-models/save-model-url")
+async def save_model_url(request):
+    """Save a user-provided URL for a model to model_metadata.json"""
+    try:
+        data = await request.json()
+        filename = data.get('filename', '')
+        url = data.get('url', '')
+
+        if not filename:
+            return web.json_response({'error': 'Filename required'}, status=400)
+        if not url:
+            return web.json_response({'error': 'URL required'}, status=400)
+
+        basename = os.path.basename(filename)
+
+        # Update model_metadata.json (single source of truth)
+        metadata = load_model_metadata()
+
+        # Get or create entry
+        entry = metadata.get(basename, {'filename': basename})
+
+        # Set user-provided URL (highest priority)
+        entry['user_url'] = url
+        entry['updated_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+
+        # Also extract info from URL
+        if 'huggingface.co' in url:
+            entry['source'] = 'huggingface'
+            hf_repo, hf_path = extract_huggingface_info(url)
+            if hf_repo:
+                entry['hf_repo'] = hf_repo
+        elif 'civitai.com' in url:
+            entry['source'] = 'civitai'
+            # Try to extract model ID from URL
+            import re
+            match = re.search(r'/models/(\d+)', url)
+            if match:
+                entry['civitai_model_id'] = match.group(1)
+
+        metadata[basename] = entry
+
+        if save_model_metadata(metadata):
+            logging.info(f"[WMD] Saved user URL for {basename}: {url}")
+            return web.json_response({'success': True})
+        else:
+            return web.json_response({'error': 'Failed to save'}, status=500)
+    except Exception as e:
+        logging.error(f"[WMD] Save model URL error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
+
+
+@routes.get("/workflow-models/hf-readme")
+async def get_hf_readme(request):
+    """Fetch README from a HuggingFace repo"""
+    try:
+        url = request.query.get('url', '')
+        if not url or 'huggingface.co' not in url:
+            return web.json_response({'error': 'Valid HuggingFace URL required'}, status=400)
+
+        # Extract repo from URL (e.g., https://huggingface.co/owner/repo/...)
+        import re
+        match = re.search(r'huggingface\.co/([^/]+/[^/]+)', url)
+        if not match:
+            return web.json_response({'readme': None, 'error': 'Could not parse repo from URL'})
+
+        repo_id = match.group(1)
+
+        # Fetch README from HuggingFace API
+        readme_url = f"https://huggingface.co/{repo_id}/raw/main/README.md"
+
+        try:
+            response = requests.get(readme_url, timeout=10)
+            if response.status_code == 200:
+                readme_content = response.text
+
+                # Simple markdown to HTML conversion for display
+                # Convert headers
+                readme_html = readme_content
+                readme_html = re.sub(r'^### (.+)$', r'<h4>\1</h4>', readme_html, flags=re.MULTILINE)
+                readme_html = re.sub(r'^## (.+)$', r'<h3>\1</h3>', readme_html, flags=re.MULTILINE)
+                readme_html = re.sub(r'^# (.+)$', r'<h2>\1</h2>', readme_html, flags=re.MULTILINE)
+                # Convert bold/italic
+                readme_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', readme_html)
+                readme_html = re.sub(r'\*(.+?)\*', r'<em>\1</em>', readme_html)
+                # Convert links
+                readme_html = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2" target="_blank">\1</a>', readme_html)
+                # Convert line breaks
+                readme_html = readme_html.replace('\n\n', '</p><p>')
+                readme_html = f'<p>{readme_html}</p>'
+                # Limit length
+                if len(readme_html) > 10000:
+                    readme_html = readme_html[:10000] + '... <em>(truncated)</em>'
+
+                return web.json_response({'readme': readme_html, 'repo': repo_id})
+            else:
+                return web.json_response({'readme': None, 'error': 'README not found'})
+        except requests.exceptions.RequestException as e:
+            return web.json_response({'readme': None, 'error': f'Failed to fetch: {str(e)}'})
+
+    except Exception as e:
+        logging.error(f"[WMD] HF README error: {e}")
+        return web.json_response({'error': str(e)}, status=500)
 
 
 @routes.get("/workflow-models/installed")
@@ -3272,12 +5041,28 @@ def _process_queued_download(download_info):
             with download_lock:
                 download_progress[download_id]['status'] = 'error'
                 download_progress[download_id]['error'] = error
+            # Add to download history
+            add_to_download_history({
+                'id': download_id,
+                'filename': filename,
+                'status': 'error',
+                'error': error,
+                'directory': os.path.dirname(dest_path)
+            })
 
         # Cache URL on success
         if success:
             source = 'civitai' if 'civitai.com' in url else ('huggingface' if 'huggingface.co' in url else 'direct')
             hf_repo, hf_path = extract_huggingface_info(url)
             _cache_download_url(filename, url, source, hf_repo=hf_repo, hf_path=hf_path)
+            # Add to download history
+            add_to_download_history({
+                'id': download_id,
+                'filename': filename,
+                'status': 'completed',
+                'total_size': download_progress.get(download_id, {}).get('total_size', 0),
+                'directory': os.path.dirname(dest_path)
+            })
             logging.info(f"[WMD] Download completed: {filename}")
 
     except Exception as e:
@@ -3285,6 +5070,14 @@ def _process_queued_download(download_info):
         with download_lock:
             download_progress[download_id]['status'] = 'error'
             download_progress[download_id]['error'] = str(e)
+        # Add to download history
+        add_to_download_history({
+            'id': download_id,
+            'filename': filename,
+            'status': 'error',
+            'error': str(e),
+            'directory': os.path.dirname(dest_path) if dest_path else ''
+        })
     finally:
         with download_queue_lock:
             active_download_count = max(0, active_download_count - 1)
@@ -3433,5 +5226,7 @@ def _init_parallel_setting():
 
 _init_parallel_setting()
 
+# Load Tavily search cache on startup
+load_tavily_cache()
 
 logging.info("[Workflow-Models-Downloader] Extension loaded successfully")
