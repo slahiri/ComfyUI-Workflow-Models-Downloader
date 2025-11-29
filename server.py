@@ -1422,6 +1422,10 @@ def scan_workflow_for_models(workflow_json):
         workflow_data = workflow_json
         content = json.dumps(workflow_json)
 
+    # Skip if not a dict (e.g., index files that are lists)
+    if not isinstance(workflow_data, dict):
+        return []
+
     # First, extract models from node properties (the proper way)
     # ComfyUI stores model info in node.properties.models array
     node_models = {}  # filename -> {url, directory, node_type}
@@ -1822,6 +1826,10 @@ _init_parallel_downloads()
 def extract_models_from_workflow(workflow_data):
     """Extract model filenames from a workflow JSON"""
     models = set()
+
+    # Skip if not a dict (e.g., index files that are lists)
+    if not isinstance(workflow_data, dict):
+        return models
 
     def extract_from_node(node):
         if isinstance(node, dict):
