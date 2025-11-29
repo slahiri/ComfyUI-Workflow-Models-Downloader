@@ -1986,17 +1986,19 @@ class WorkflowModelsDownloader {
             // Check each model to see if it has an active download
             for (let i = 0; i < this.models.length; i++) {
                 const model = this.models[i];
+                const modelFilename = model.filename.replace(/[\/\\]/g, '_');
 
-                // Check various possible download IDs for this model
-                const possibleIds = [
-                    `${model.hf_repo}/${model.filename}`.replace(/\//g, '_'),
-                    `direct_${model.filename}`.replace(/[\/\\]/g, '_')
-                ];
+                // Check ALL progress entries for this model's filename
+                // This handles all download ID formats: direct_, hf_repo/, queued_
+                for (const [downloadId, progress] of Object.entries(allProgress)) {
+                    // Match by filename in the progress data or in the download ID
+                    const progressFilename = (progress.filename || '').replace(/[\/\\]/g, '_');
+                    const matchesFilename = progressFilename === modelFilename ||
+                                           downloadId.includes(modelFilename) ||
+                                           downloadId.endsWith(`_${modelFilename}`);
 
-                for (const downloadId of possibleIds) {
-                    if (allProgress[downloadId]) {
-                        const progress = allProgress[downloadId];
-                        if (progress.status === 'downloading' || progress.status === 'starting') {
+                    if (matchesFilename) {
+                        if (progress.status === 'downloading' || progress.status === 'starting' || progress.status === 'queued') {
                             // Found an active download for this model
                             this.downloads[i] = downloadId;
                             hasActiveDownloads = true;
@@ -2013,6 +2015,7 @@ class WorkflowModelsDownloader {
                             if (searchBtn) searchBtn.style.display = "none";
 
                             this.updateDownloadUI(i, progress);
+                            break;
                         } else if (progress.status === 'completed') {
                             // Download completed while modal was closed
                             model.exists = true;
@@ -2021,8 +2024,8 @@ class WorkflowModelsDownloader {
                                 statusCell.className = "wmd-status-exists";
                                 this.recheckModelStatus(i);
                             }
+                            break;
                         }
-                        break;
                     }
                 }
             }
