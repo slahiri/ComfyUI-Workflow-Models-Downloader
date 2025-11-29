@@ -20,4 +20,4 @@ Documentation = "https://github.com/slahiri/ComfyUI-Workflow-Models-Downloader#r
 [tool.comfy]
 PublisherId = "slahiri"
 DisplayName = "Workflow Models Downloader"
-Icon = "https://raw.githubusercontent.com/slahiri/ComfyUI-Workflow-Models-Downloader/main/screenshot.png"
+Icon = "https://raw.githubusercontent.com/slahiri/ComfyUI-Workflow-Models-Downloader/main/images/workflow-models-tab.png"

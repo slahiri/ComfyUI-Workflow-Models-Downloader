@@ -24,6 +24,20 @@ Manage all your downloads in one place. Features Direct URL Download - paste any
 
 ![Downloads Tab](images/downloads-tab.png)
 
+### Workflows Tab
+Browse saved workflow files and manage model sources:
+- **3-column layout** - Workflows list, models in workflow, model details
+- **Manual source entry** - Add download URLs for models with unknown sources
+- **Advanced Search** - AI-powered search using Tavily to find model sources
+- **Search caching** - Results persist across restarts
+
+![Workflows Tab](images/workflows-tab.png)
+
+### Advanced Search (Tavily)
+When a model source is unknown, use Advanced Search to find possible download sources from HuggingFace, CivitAI, and other sites.
+
+![Advanced Search](images/workflows-search.png)
+
 ### Local Browser Tab
 Browse all your installed models organized by folder. Features include:
 - **Folder tree sidebar** with model counts per category
