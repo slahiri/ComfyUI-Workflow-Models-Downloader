@@ -4512,6 +4512,44 @@ class WorkflowModelsDownloader {
 
             <div class="wmd-help-section">
                 <div class="wmd-help-section-title">
+                    <span>🔎</span> How to Get a Tavily API Key
+                </div>
+                <div class="wmd-help-section-content">
+                    Tavily enables AI-powered web search to find model sources:
+                    <ol>
+                        <li>Go to <a href="https://tavily.com" target="_blank" class="wmd-help-link">tavily.com</a></li>
+                        <li>Sign up for a free account</li>
+                        <li>Go to your dashboard and copy your API key</li>
+                        <li>Paste it in <strong>Settings tab > Tavily API Key</strong></li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Note:</strong> Tavily offers 1,000 free searches/month. Search results are cached locally
+                        so repeated searches for the same model don't use additional quota.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
+                    <span>📂</span> Workflows Tab - Browse Saved Workflows
+                </div>
+                <div class="wmd-help-section-content">
+                    The Workflows tab lets you browse all your saved workflow files:
+                    <ol>
+                        <li><strong>Left column:</strong> Lists all workflow files from your configured folders</li>
+                        <li><strong>Middle column:</strong> Shows models used in the selected workflow</li>
+                        <li><strong>Right column:</strong> Shows details for the selected model</li>
+                    </ol>
+                    <div class="wmd-help-note">
+                        <strong>Manual Source Entry:</strong> If a model has no source URL, you'll see a text input field.
+                        Paste the download URL (HuggingFace, CivitAI, or direct link) and click <strong>Save</strong>.
+                        The URL is automatically parsed and saved for future use.
+                    </div>
+                </div>
+            </div>
+
+            <div class="wmd-help-section">
+                <div class="wmd-help-section-title">
                     <span>🔍</span> Model Not Found / Unknown URLs
                 </div>
                 <div class="wmd-help-section-content">
@@ -4520,10 +4558,11 @@ class WorkflowModelsDownloader {
                         <li><strong>Search URL:</strong> Click to search HuggingFace and CivitAI APIs</li>
                         <li><strong>Lookup Hash:</strong> If you have the file, calculates SHA256 and searches CivitAI</li>
                         <li><strong>Advanced Search:</strong> Uses AI-powered web search (requires Tavily API key)</li>
-                        <li><strong>Manual URL:</strong> Paste a direct download URL in the input field</li>
+                        <li><strong>Manual Entry:</strong> In Workflows tab, paste URL directly into the Source field</li>
                     </ol>
                     <div class="wmd-help-note">
-                        <strong>Tip:</strong> For renamed models, try searching by the original filename or model type.
+                        <strong>Tip:</strong> Search results are cached and persist across restarts.
+                        Use Advanced Search to find sources, then copy the URL to the Source field.
                     </div>
                 </div>
             </div>
